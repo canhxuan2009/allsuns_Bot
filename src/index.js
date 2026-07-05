@@ -248,6 +248,106 @@ client.on(Events.MessageCreate, async (message) => {
     }
 });
 
+// ─── Chatbot Gemini tự động (Google AI Studio) ─────────────────────────
+const GEMINI_CHANNEL_ID = process.env.GEMINI_CHANNEL_ID;
+const { chatWithGemini } = require('./utils/geminiChat');
+
+client.on(Events.MessageCreate, async (message) => {
+    // Bỏ qua nếu chưa cấu hình channel hoặc tin nhắn không thuộc channel chỉ định
+    if (!GEMINI_CHANNEL_ID || message.channel.id !== GEMINI_CHANNEL_ID) return;
+
+    // Bỏ qua tin nhắn của bot (bao gồm cả chính nó và bot khác)
+    if (message.author.bot) return;
+
+    try {
+        // Kích hoạt trạng thái đang gõ (typing indicator)
+        await message.channel.sendTyping();
+
+        // Lấy 15 tin nhắn gần nhất để làm ngữ cảnh hội thoại
+        const fetched = await message.channel.messages.fetch({ limit: 15 });
+        const history = Array.from(fetched.values()).reverse();
+
+        const contents = [];
+        for (const msg of history) {
+            // Bỏ qua tin nhắn trống (ví dụ tin nhắn hệ thống hoặc chỉ có attachment không đọc được)
+            if (!msg.content && msg.embeds.length === 0) continue;
+
+            const isBot = msg.author.id === client.user.id;
+            const role = isBot ? 'model' : 'user';
+
+            let text = msg.content;
+            if (!text && msg.embeds.length > 0) {
+                const embed = msg.embeds[0];
+                text = [embed.title, embed.description].filter(Boolean).join('\n\n');
+            }
+
+            // Gắn tên user vào trước tin nhắn của user để Gemini biết ai đang nói chuyện
+            const formattedText = !isBot 
+                ? `[${msg.author.displayName ?? msg.author.username}]: ${text}`
+                : text;
+
+            const lastContent = contents[contents.length - 1];
+            if (lastContent && lastContent.role === role) {
+                // Nhóm các tin nhắn liên tiếp của cùng 1 role
+                lastContent.parts[0].text += `\n${formattedText}`;
+            } else {
+                contents.push({
+                    role: role,
+                    parts: [{ text: formattedText }]
+                });
+            }
+        }
+
+        // Đảm bảo lượt đầu tiên bắt đầu bằng 'user' (quy định của Gemini API)
+        while (contents.length > 0 && contents[0].role !== 'user') {
+            contents.shift();
+        }
+
+        if (contents.length === 0) {
+            return;
+        }
+
+        // Gọi Gemini API
+        const replyText = await chatWithGemini(contents);
+
+        if (!replyText) {
+            await message.reply({ content: '❌ Xin lỗi, mình gặp lỗi khi kết nối với bộ não Gemini. Vui lòng thử lại sau!' });
+            return;
+        }
+
+        // Chia nhỏ tin nhắn nếu dài hơn 2000 ký tự (giới hạn của Discord)
+        let text = replyText;
+        const chunks = [];
+        
+        while (text.length > 0) {
+            if (text.length <= 2000) {
+                chunks.push(text);
+                break;
+            }
+            let chunk = text.substring(0, 2000);
+            let splitIdx = chunk.lastIndexOf('\n');
+            if (splitIdx === -1 || splitIdx < 1500) {
+                splitIdx = chunk.lastIndexOf(' ');
+            }
+            if (splitIdx === -1 || splitIdx < 1500) {
+                splitIdx = 2000;
+            }
+            chunks.push(text.substring(0, splitIdx));
+            text = text.substring(splitIdx).trim();
+        }
+
+        // Gửi từng phần phản hồi
+        for (const chunk of chunks) {
+            if (chunk.length > 0) {
+                await message.reply({ content: chunk });
+            }
+        }
+
+    } catch (error) {
+        logger.error(`[Gemini Chatbot] Lỗi xử lý tin nhắn: ${error.message}`);
+    }
+});
+
 // Bot ready
 client.once(Events.ClientReady, (readyClient) => {
     logger.info('━'.repeat(50));
