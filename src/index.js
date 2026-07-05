@@ -248,103 +248,164 @@ client.on(Events.MessageCreate, async (message) => {
     }
 });
 
-// ─── Chatbot Gemini tự động (Google AI Studio) ─────────────────────────
-const GEMINI_CHANNEL_ID = process.env.GEMINI_CHANNEL_ID;
-const { chatWithGemini } = require('./utils/geminiChat');
+// ─── Kiểm duyệt hình ảnh tự động bằng AI (Gemini Vision) ──────────────
+const MODERATION_MEMBER_ROLE_ID = process.env.MODERATION_MEMBER_ROLE_ID;
+const MODERATION_OWNER_ID = process.env.MODERATION_OWNER_ID;
+const MODERATION_MUTE_MINUTES = parseInt(process.env.MODERATION_MUTE_MINUTES) || 60;
+const { analyzeImage } = require('./utils/imageModeration');
+
+// Danh sách các MIME type ảnh được hỗ trợ
+const IMAGE_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
+// Danh sách user đã bị phát hiện scam — tự động xoá tin nhắn tiếp theo mà không cần gọi API
+// Lưu theo guildId:userId để tránh xung đột giữa các server
+const flaggedScamUsers = new Set();
 
 client.on(Events.MessageCreate, async (message) => {
-    // Bỏ qua nếu chưa cấu hình channel hoặc tin nhắn không thuộc channel chỉ định
-    if (!GEMINI_CHANNEL_ID || message.channel.id !== GEMINI_CHANNEL_ID) return;
+    // Bỏ qua nếu chưa cấu hình hoặc không phải tin nhắn trong server
+    if (!MODERATION_MEMBER_ROLE_ID || !message.guild || message.author.bot) return;
 
-    // Bỏ qua tin nhắn của bot (bao gồm cả chính nó và bot khác)
-    if (message.author.bot) return;
+    // Kiểm tra người gửi có role Member hay không
+    const member = message.member;
+    if (!member || !member.roles.cache.has(MODERATION_MEMBER_ROLE_ID)) return;
 
-    try {
-        // Kích hoạt trạng thái đang gõ (typing indicator)
-        await message.channel.sendTyping();
+    // ── Kiểm tra user đã bị gắn cờ scam ─────────────────────────────
+    // Nếu user đã bị phát hiện scam trước đó → xoá tin nhắn ngay, không cần gọi API
+    const flagKey = `${message.guild.id}:${message.author.id}`;
+    if (flaggedScamUsers.has(flagKey)) {
+        try {
+            await message.delete();
+            logger.info(`[ImageMod] 🗑️ Đã xoá tin nhắn của user bị gắn cờ scam: ${message.author.tag}`);
+        } catch (err) {
+            logger.error(`[ImageMod] Không thể xoá tin nhắn của user gắn cờ: ${err.message}`);
+        }
+        return;
+    }
 
-        // Lấy 15 tin nhắn gần nhất để làm ngữ cảnh hội thoại
-        const fetched = await message.channel.messages.fetch({ limit: 15 });
-        const history = Array.from(fetched.values()).reverse();
+    // Kiểm tra tin nhắn có chứa attachment ảnh hay không
+    const imageAttachments = message.attachments.filter(
+        att => att.contentType && IMAGE_CONTENT_TYPES.includes(att.contentType.split(';')[0])
+    );
+    if (imageAttachments.size === 0) return;
 
-        const contents = [];
-        for (const msg of history) {
-            // Bỏ qua tin nhắn trống (ví dụ tin nhắn hệ thống hoặc chỉ có attachment không đọc được)
-            if (!msg.content && msg.embeds.length === 0) continue;
+    // Phân tích từng ảnh
+    for (const [, attachment] of imageAttachments) {
+        try {
+            logger.info(`[ImageMod] Đang phân tích ảnh từ ${message.author.tag}: ${attachment.url}`);
 
-            const isBot = msg.author.id === client.user.id;
-            const role = isBot ? 'model' : 'user';
+            const result = await analyzeImage(attachment.url);
+            if (!result) continue; // Lỗi API hoặc không parse được → bỏ qua
 
-            let text = msg.content;
-            if (!text && msg.embeds.length > 0) {
-                const embed = msg.embeds[0];
-                text = [embed.title, embed.description].filter(Boolean).join('\n\n');
+            // ── Xử lý SCAM ──────────────────────────────────────────
+            if (result.category === 'SCAM') {
+                logger.warn(`[ImageMod] 🚨 SCAM detected! User: ${message.author.tag} | Reason: ${result.reason}`);
+
+                // Gắn cờ user → mọi tin nhắn tiếp theo sẽ bị xoá tự động trong vòng 1 phút
+                flaggedScamUsers.add(flagKey);
+                setTimeout(() => {
+                    flaggedScamUsers.delete(flagKey);
+                    logger.info(`[ImageMod] 🔓 Đã gỡ bỏ cờ scam cho user: ${message.author.tag}`);
+                }, 60_000);
+
+                // 1. Xoá tin nhắn
+                try {
+                    await message.delete();
+                } catch (delErr) {
+                    logger.error(`[ImageMod] Không thể xoá tin nhắn: ${delErr.message}`);
+                }
+
+                // 2. Mute (timeout) người gửi
+                try {
+                    const muteDuration = MODERATION_MUTE_MINUTES * 60 * 1000; // Chuyển sang milliseconds
+                    await member.timeout(muteDuration, `[AutoMod] Phát hiện ảnh lừa đảo: ${result.reason}`);
+                    logger.info(`[ImageMod] ✅ Đã mute ${message.author.tag} trong ${MODERATION_MUTE_MINUTES} phút.`);
+                } catch (muteErr) {
+                    logger.error(`[ImageMod] Không thể mute ${message.author.tag}: ${muteErr.message}`);
+                }
+
+                // 3. Gửi cảnh báo trong kênh
+                try {
+                    const warning = await message.channel.send(
+                        `🚨 ${message.author} đã bị phát hiện gửi **nội dung lừa đảo** và đã bị mute.\n` +
+                        `Nếu có sai sót, vui lòng nhắn tin trực tiếp (DM) cho Admin để được hỗ trợ. 📩`
+                    );
+                    // Tự xoá cảnh báo sau 15 giây
+                    setTimeout(() => warning.delete().catch(() => {}), 15_000);
+                } catch (warnErr) {
+                    logger.error(`[ImageMod] Không thể gửi cảnh báo trong kênh: ${warnErr.message}`);
+                }
+
+                // Nội dung thông báo chi tiết (dùng chung cho cả owner và người vi phạm)
+                const violationInfo =
+                    `🚨 **Phát hiện ảnh lừa đảo (SCAM)**\n\n` +
+                    `👤 **Người gửi:** ${message.author.tag} (${message.author.id})\n` +
+                    `📍 **Kênh:** #${message.channel.name} (${message.channel.id})\n` +
+                    `🏠 **Server:** ${message.guild.name}\n` +
+                    `📝 **Lý do:** ${result.reason}\n` +
+                    `⏱️ **Đã mute:** ${MODERATION_MUTE_MINUTES} phút\n` +
+                    `🕐 **Thời gian:** ${new Date().toLocaleString('vi-VN')}`;
+
+                // 4. DM cho chủ bot kèm ảnh vi phạm
+                if (MODERATION_OWNER_ID) {
+                    try {
+                        const owner = await message.client.users.fetch(MODERATION_OWNER_ID);
+                        await owner.send({
+                            content: violationInfo,
+                            files: [{ attachment: attachment.url, name: attachment.name || 'scam_image.png' }]
+                        });
+                        logger.info(`[ImageMod] ✅ Đã gửi DM thông báo cho owner.`);
+                    } catch (dmErr) {
+                        logger.error(`[ImageMod] Không thể gửi DM cho owner: ${dmErr.message}`);
+                    }
+                }
+
+                // 5. DM cho người vi phạm kèm ảnh
+                try {
+                    await message.author.send({
+                        content:
+                            violationInfo + `\n\n` +
+                            `📩 Nếu bạn cho rằng đây là nhầm lẫn, vui lòng nhắn tin trực tiếp cho Admin của server để được hỗ trợ giải quyết.`,
+                        files: [{ attachment: attachment.url, name: attachment.name || 'scam_image.png' }]
+                    });
+                    logger.info(`[ImageMod] ✅ Đã gửi DM thông báo cho người vi phạm: ${message.author.tag}`);
+                } catch (dmErr) {
+                    logger.error(`[ImageMod] Không thể gửi DM cho người vi phạm (có thể đã tắt DM): ${dmErr.message}`);
+                }
+
+                break; // Đã xoá tin nhắn, không cần kiểm tra các ảnh còn lại
             }
 
-            // Gắn tên user vào trước tin nhắn của user để Gemini biết ai đang nói chuyện
-            const formattedText = !isBot 
-                ? `[${msg.author.displayName ?? msg.author.username}]: ${text}`
-                : text;
+            // ── Xử lý NSFW ──────────────────────────────────────────
+            if (result.category === 'NSFW') {
+                logger.warn(`[ImageMod] 🔞 NSFW detected! User: ${message.author.tag} | Reason: ${result.reason}`);
 
-            const lastContent = contents[contents.length - 1];
-            if (lastContent && lastContent.role === role) {
-                // Nhóm các tin nhắn liên tiếp của cùng 1 role
-                lastContent.parts[0].text += `\n${formattedText}`;
-            } else {
-                contents.push({
-                    role: role,
-                    parts: [{ text: formattedText }]
-                });
+                // 1. Xoá tin nhắn
+                try {
+                    await message.delete();
+                } catch (delErr) {
+                    logger.error(`[ImageMod] Không thể xoá tin nhắn: ${delErr.message}`);
+                }
+
+                // 2. Ping cảnh báo trong kênh
+                try {
+                    const warning = await message.channel.send(
+                        `⚠️ ${message.author} Bạn đã gửi ảnh có nội dung nhạy cảm (NSFW).\n` +
+                        `Hành vi này vi phạm quy tắc server. Vui lòng không lặp lại! 🚫`
+                    );
+                    // Tự xoá cảnh báo sau 10 giây
+                    setTimeout(() => warning.delete().catch(() => {}), 10_000);
+                } catch (warnErr) {
+                    logger.error(`[ImageMod] Không thể gửi cảnh báo: ${warnErr.message}`);
+                }
+
+                break; // Đã xoá tin nhắn, không cần kiểm tra các ảnh còn lại
             }
+
+            // SAFE → không làm gì
+
+        } catch (error) {
+            logger.error(`[ImageMod] Lỗi xử lý ảnh: ${error.message}`);
         }
-
-        // Đảm bảo lượt đầu tiên bắt đầu bằng 'user' (quy định của Gemini API)
-        while (contents.length > 0 && contents[0].role !== 'user') {
-            contents.shift();
-        }
-
-        if (contents.length === 0) {
-            return;
-        }
-
-        // Gọi Gemini API
-        const replyText = await chatWithGemini(contents);
-
-        if (!replyText) {
-            await message.reply({ content: '❌ Xin lỗi, mình gặp lỗi khi kết nối với bộ não Gemini. Vui lòng thử lại sau!' });
-            return;
-        }
-
-        // Chia nhỏ tin nhắn nếu dài hơn 2000 ký tự (giới hạn của Discord)
-        let text = replyText;
-        const chunks = [];
-        
-        while (text.length > 0) {
-            if (text.length <= 2000) {
-                chunks.push(text);
-                break;
-            }
-            let chunk = text.substring(0, 2000);
-            let splitIdx = chunk.lastIndexOf('\n');
-            if (splitIdx === -1 || splitIdx < 1500) {
-                splitIdx = chunk.lastIndexOf(' ');
-            }
-            if (splitIdx === -1 || splitIdx < 1500) {
-                splitIdx = 2000;
-            }
-            chunks.push(text.substring(0, splitIdx));
-            text = text.substring(splitIdx).trim();
-        }
-
-        // Gửi từng phần phản hồi
-        for (const chunk of chunks) {
-            if (chunk.length > 0) {
-                await message.reply({ content: chunk });
-            }
-        }
-
-    } catch (error) {
-        logger.error(`[Gemini Chatbot] Lỗi xử lý tin nhắn: ${error.message}`);
     }
 });
 
