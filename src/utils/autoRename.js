@@ -47,7 +47,7 @@ async function countMessages(channel) {
 async function doRename(guildId, channelId) {
     debounceTimers.delete(channelId);
 
-    const tracked = getTracked(guildId, channelId);
+    const tracked = await getTracked(guildId, channelId);
     if (!tracked || !_client) return;
 
     // Kiểm tra biến tạm: nếu là false (không có thay đổi mới) thì không đổi tên nữa
@@ -75,7 +75,7 @@ async function doRename(guildId, channelId) {
 
         if (!channel) {
             logger.warn(`[AutoRename] Không tìm thấy kênh ${channelId}, xóa khỏi danh sách theo dõi.`);
-            removeTracked(guildId, channelId);
+            await removeTracked(guildId, channelId);
             needsRename.delete(channelId);
             return;
         }

@@ -14,7 +14,7 @@ module.exports = {
 
     async execute(interaction) {
         const guildId = interaction.guild.id;
-        const allMembers = getAllMembers(guildId);
+        const allMembers = await getAllMembers(guildId);
 
         // Sắp xếp theo tổng tiền giảm dần
         const sorted = Object.entries(allMembers)

@@ -44,7 +44,7 @@ module.exports = {
         }
 
         const guildId = interaction.guild.id;
-        const memberData = getMember(guildId, targetUser.id);
+        const memberData = await getMember(guildId, targetUser.id);
 
         if (memberData.totalAmount === 0 && memberData.transactions.length === 0) {
             return interaction.reply({
@@ -62,7 +62,7 @@ module.exports = {
         await removeAllVipRoles(interaction.guild, targetMember);
 
         // Xóa dữ liệu
-        deleteMember(guildId, targetUser.id);
+        await deleteMember(guildId, targetUser.id);
 
         const embed = new EmbedBuilder()
             .setColor(0xe74c3c)

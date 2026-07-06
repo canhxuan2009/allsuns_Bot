@@ -1,6 +1,7 @@
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+const mongoose = require('mongoose');
 const { Client, Collection, GatewayIntentBits, Events } = require('discord.js');
 const logger = require('./utils/logger');
 const { init: initAutoRename, scheduleRename } = require('./utils/autoRename');
@@ -18,6 +19,13 @@ const TRANSLATE_PING_ROLE_ID = process.env.TRANSLATE_PING_ROLE_ID;
 if (!process.env.DISCORD_TOKEN) {
     logger.error('FATAL: Biến môi trường DISCORD_TOKEN chưa được cấu hình!');
     logger.error('Trên Pterodactyl: Startup tab → Variables → thêm DISCORD_TOKEN');
+    process.exit(1);
+}
+
+// Kiểm tra MongoDB URI
+if (!process.env.MONGODB_URI) {
+    logger.error('FATAL: Biến môi trường MONGODB_URI chưa được cấu hình!');
+    logger.error('Vui lòng thêm MONGODB_URI=mongodb+srv://... vào file .env');
     process.exit(1);
 }
 
@@ -134,7 +142,7 @@ function isValidVouch(text) {
 client.on(Events.MessageCreate, async (message) => {
     if (!message.guild || message.author.bot) return;
 
-    const tracked = getTracked(message.guild.id, message.channel.id);
+    const tracked = await getTracked(message.guild.id, message.channel.id);
     if (!tracked) return;
 
     // Kiểm tra cú pháp trong kênh đang theo dõi
@@ -165,19 +173,19 @@ client.on(Events.MessageCreate, async (message) => {
 });
 
 // Lắng nghe tin nhắn bị xóa đơn lẻ (bỏ qua tin nhắn bot — cảnh báo tự xóa)
-client.on(Events.MessageDelete, (message) => {
+client.on(Events.MessageDelete, async (message) => {
     if (!message.guild) return;
     if (message.author?.bot) return;
-    const tracked = getTracked(message.guild.id, message.channel.id);
+    const tracked = await getTracked(message.guild.id, message.channel.id);
     if (!tracked) return;
     scheduleRename(message.guild.id, message.channel.id);
 });
 
 // Lắng nghe xóa tin nhắn hàng loạt
-client.on(Events.MessageBulkDelete, (messages) => {
+client.on(Events.MessageBulkDelete, async (messages) => {
     const first = messages.first();
     if (!first?.guild) return;
-    const tracked = getTracked(first.guild.id, first.channel.id);
+    const tracked = await getTracked(first.guild.id, first.channel.id);
     if (!tracked) return;
     scheduleRename(first.guild.id, first.channel.id);
 });
@@ -419,5 +427,18 @@ client.once(Events.ClientReady, (readyClient) => {
     logger.info('━'.repeat(50));
 });
 
-// Đăng nhập
-client.login(process.env.DISCORD_TOKEN);
+// ─── Kết nối MongoDB rồi đăng nhập Discord ─────────────────────────────
+async function start() {
+    try {
+        await mongoose.connect(process.env.MONGODB_URI);
+        logger.info('✅ Đã kết nối MongoDB Atlas thành công!');
+    } catch (error) {
+        logger.error(`❌ Không thể kết nối MongoDB: ${error.message}`);
+        process.exit(1);
+    }
+
+    // Đăng nhập Discord sau khi kết nối DB thành công
+    client.login(process.env.DISCORD_TOKEN);
+}
+
+start();

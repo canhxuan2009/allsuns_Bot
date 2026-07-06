@@ -57,7 +57,7 @@ module.exports = {
                 await channel.setName(newName, 'Khởi tạo bởi /mescount track');
 
                 // Lưu vào danh sách theo dõi
-                addTracked(interaction.guild.id, channel.id, baseName);
+                await addTracked(interaction.guild.id, channel.id, baseName);
 
                 const embed = new EmbedBuilder()
                     .setColor(0x57F287)
@@ -83,7 +83,7 @@ module.exports = {
         // ─────────────── /mescount stop ───────────────
         if (sub === 'stop') {
             const channel = interaction.options.getChannel('channel');
-            const removed = removeTracked(interaction.guild.id, channel.id);
+            const removed = await removeTracked(interaction.guild.id, channel.id);
 
             if (!removed) {
                 return interaction.reply({
@@ -104,7 +104,7 @@ module.exports = {
 
         // ─────────────── /mescount list ───────────────
         if (sub === 'list') {
-            const allTracked = getAllTracked();
+            const allTracked = await getAllTracked();
             const guildTracked = allTracked[interaction.guild.id] ?? {};
             const entries = Object.entries(guildTracked);
 

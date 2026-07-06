@@ -44,7 +44,7 @@ module.exports = {
         }
 
         const guildId = interaction.guild.id;
-        const memberData = getMember(guildId, targetUser.id);
+        const memberData = await getMember(guildId, targetUser.id);
         const oldLevel = getVipLevel(memberData.totalAmount);
 
         // Thêm giao dịch
@@ -56,7 +56,7 @@ module.exports = {
             addedBy: interaction.user.id,
         });
 
-        updateMember(guildId, targetUser.id, memberData);
+        await updateMember(guildId, targetUser.id, memberData);
 
         const newLevel = getVipLevel(memberData.totalAmount);
 

@@ -22,7 +22,7 @@ module.exports = {
         }
 
         const guildId = interaction.guild.id;
-        const memberData = getMember(guildId, targetUser.id);
+        const memberData = await getMember(guildId, targetUser.id);
         const vipLevel = getVipLevel(memberData.totalAmount);
 
         // Lấy 5 giao dịch gần nhất
