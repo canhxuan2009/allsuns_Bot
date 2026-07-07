@@ -2,28 +2,39 @@
  * geminiHelper.js — Helper quản lý gọi Gemini API và tự động chuyển model khi hết quota
  * 
  * Hỗ trợ tự động chuyển đổi qua lại giữa các model khi gặp lỗi 429 (Too Many Requests / Quota Exceeded)
+ * Có cơ chế cooldown để ưu tiên quay lại dùng các model tốt nhất sau khi chúng hồi phục RPM (Requests Per Minute).
  */
 
 const logger = require('./logger');
 
-// Danh sách các model Gemini dự phòng theo thứ tự ưu tiên
+// Danh sách các model AI dự phòng theo thứ tự ưu tiên (Ưu tiên model mạnh trước)
+// Dựa vào RPM để phân bổ hợp lý, model mạnh (RPM thấp) sẽ dùng trước, hết RPM sẽ lùi về model RPM cao
 const DEFAULT_FALLBACK_MODELS = [
-    'gemini-2.5-flash',
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-1.5-pro'
+    'gemini-3.5-flash',       // Chất lượng cao nhất, RPM: 5
+    'gemini-3.1-flash-lite',  // Tốc độ cao, RPM: 15
+    'gemini-2.5-flash',       // Chất lượng cao, RPM: 5
+    'gemini-2.5-flash-lite',  // Tốc độ cao, RPM: 10
+    'gemma-4-31b',            // Model open-weight lớn, RPM: 15
+    'gemma-4-26b'             // Model open-weight, RPM: 15
 ];
 
-// Model đang hoạt động tốt hiện tại (bắt đầu bằng model được cấu hình ở .env)
-let currentActiveModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+// Lấy model ưu tiên cao nhất từ .env, nếu không có thì lấy phần tử đầu tiên
+const PRIMARY_MODEL = process.env.GEMINI_MODEL || DEFAULT_FALLBACK_MODELS[0];
 
-// Danh sách tất cả các model ta sẽ thử (đưa model từ .env lên đầu nếu chưa có)
-const modelsToTry = [currentActiveModel];
+// Xây dựng danh sách model sẽ thử: đảm bảo PRIMARY_MODEL ở đầu
+const modelsToTry = [PRIMARY_MODEL];
 for (const model of DEFAULT_FALLBACK_MODELS) {
     if (!modelsToTry.includes(model)) {
         modelsToTry.push(model);
     }
 }
+
+// Lưu trữ thời gian model có thể được dùng lại (do bị lỗi 429)
+// { "model-name": timestamp_cooldown_hết_hạn }
+const modelCooldowns = {};
+
+// Biến lưu trạng thái model đang active, dùng để log khi thay đổi
+let currentActiveModel = PRIMARY_MODEL;
 
 /**
  * Gọi Gemini API với cơ chế tự động chuyển sang model dự phòng khi gặp lỗi 429
@@ -38,14 +49,21 @@ async function callGeminiWithFallback(requestBody) {
         return null;
     }
 
-    // Tìm vị trí của model hiện tại trong danh sách để biết bắt đầu thử từ đâu
-    let startIndex = modelsToTry.indexOf(currentActiveModel);
-    if (startIndex === -1) startIndex = 0;
+    const now = Date.now();
+    
+    // Lọc ra danh sách các model hiện không bị cooldown
+    // Vẫn giữ nguyên thứ tự ưu tiên ban đầu
+    let availableModels = modelsToTry.filter(model => !modelCooldowns[model] || now > modelCooldowns[model]);
+    
+    // Nếu tất cả đều đang cooldown, cứ lấy toàn bộ danh sách để thử ép gọi
+    if (availableModels.length === 0) {
+        logger.warn('[GeminiHelper] ⚠️ Tất cả các model đều đang trong thời gian cooldown! Đang thử ép gọi lại...');
+        availableModels = [...modelsToTry];
+    }
 
-    // Lặp qua các model trong danh sách bắt đầu từ model đang active
-    for (let i = 0; i < modelsToTry.length; i++) {
-        const modelIndex = (startIndex + i) % modelsToTry.length;
-        const modelName = modelsToTry[modelIndex];
+    // Thử lần lượt các model đang available
+    for (let i = 0; i < availableModels.length; i++) {
+        const modelName = availableModels[i];
         
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
@@ -60,25 +78,41 @@ async function callGeminiWithFallback(requestBody) {
             });
 
             if (response.status === 429) {
-                logger.warn(`[GeminiHelper] ⚠️ Model ${modelName} hết quota hoặc quá giới hạn request (Lỗi 429). Đang chuyển sang model khác...`);
+                // Phạt cooldown 60 giây vì đã cạn RPM
+                logger.warn(`[GeminiHelper] ⚠️ Model ${modelName} hết quota/RPM (Lỗi 429). Bắt đầu cooldown 60s và chuyển sang model khác...`);
+                modelCooldowns[modelName] = Date.now() + 60 * 1000;
                 continue; // Thử model tiếp theo
             }
 
             if (!response.ok) {
                 const errorText = await response.text();
-                // Nếu lỗi 401 hoặc 403 (sai API Key), không cần thử model khác
+                // Lỗi 401, 403 thường là do key hỏng/hết hạn, không nên thử thêm
                 if (response.status === 401 || response.status === 403) {
                     logger.error(`[GeminiHelper] ❌ Sai API Key hoặc không có quyền truy cập API (${response.status}): ${errorText}`);
                     return null;
                 }
                 
+                // Lỗi 404 có thể do model không tồn tại
+                if (response.status === 404) {
+                    logger.error(`[GeminiHelper] ❌ Model ${modelName} không tồn tại hoặc URL sai (${response.status}). Thử model khác...`);
+                    modelCooldowns[modelName] = Date.now() + 5 * 60 * 1000; // Phạt 5 phút
+                    continue;
+                }
+                
+                // Lỗi 503 Overloaded thì cho cooldown ngắn 10 giây
+                if (response.status === 503) {
+                    logger.warn(`[GeminiHelper] ⚠️ Máy chủ quá tải với model ${modelName} (Lỗi 503). Đang cooldown 10s...`);
+                    modelCooldowns[modelName] = Date.now() + 10 * 1000;
+                    continue;
+                }
+
                 logger.error(`[GeminiHelper] Lỗi khi gọi Gemini API với model ${modelName} (${response.status}): ${errorText}`);
                 continue; // Thử model tiếp theo
             }
 
             const data = await response.json();
             
-            // Nếu thành công và model sử dụng khác model cũ, ghi log đổi model active
+            // Nếu thành công, cập nhật log model active
             if (currentActiveModel !== modelName) {
                 logger.info(`[GeminiHelper] 🔄 Đã đổi model hoạt động chính sang: ${modelName}`);
                 currentActiveModel = modelName;
@@ -92,7 +126,7 @@ async function callGeminiWithFallback(requestBody) {
         }
     }
 
-    logger.error('[GeminiHelper] ❌ Tất cả các model Gemini đều thất bại hoặc hết quota!');
+    logger.error('[GeminiHelper] ❌ Tất cả các model AI đều thất bại hoặc đang bị limit quá nặng!');
     return null;
 }
 
