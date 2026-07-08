@@ -27,7 +27,7 @@ async function updateMember(guildId, userId, memberData) {
             totalAmount: memberData.totalAmount,
             transactions: memberData.transactions,
         },
-        { upsert: true, new: true },
+        { upsert: true, returnDocument: 'after' },
     );
 }
 

@@ -35,25 +35,23 @@ module.exports = {
 
         // Tạo embed chính
         const embed = new EmbedBuilder()
-            .setColor(0x2ecc71)
+            .setColor(0x6C7AF5)
             .setTitle('🤝 Hỗ Trợ Giao Dịch Trung Gian')
             .setDescription(
                 '**Bạn muốn giao dịch an toàn?**\n\n' +
                 'Dịch vụ Trung Gian giúp bảo vệ quyền lợi của cả Người Mua và Người Bán.\n' +
                 'Midman sẽ giữ tiền cho đến khi hàng hoá được giao đầy đủ.\n\n' +
-                '**📋 Quy trình:**\n' +
+                '**<a:bell:1524418557658665082> Quy trình:**\n' +
                 '> 1️⃣ Bấm nút bên dưới để tạo Ticket\n' +
                 '> 2️⃣ Điền thông tin giao dịch (ID Người Bán, số tiền, loại tiền)\n' +
                 '> 3️⃣ Chuyển tiền cho Midman\n' +
                 '> 4️⃣ Người Bán giao hàng\n' +
                 '> 5️⃣ Xác nhận & Midman giải ngân\n\n' +
-                '💱 **Hỗ trợ:** VND & DonutSMP Money\n' +
-                '🛡️ **Miễn phí** (hoặc phí theo nấc tùy cấu hình)\n\n' +
+                '<a:money:1524418616538435634> **Hỗ trợ:** VND & DonutSMP Money\n' +
+                '🛡️ **Miễn phí**\n\n' +
                 '⬇️ Bấm nút bên dưới để bắt đầu!'
             )
             .setFooter({ text: `${interaction.guild.name} • Dịch vụ Trung Gian` })
-            .setTimestamp();
-
         // Đính kèm ảnh nếu có
         if (imageUrl) {
             embed.setImage(imageUrl);
@@ -63,7 +61,8 @@ module.exports = {
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('escrow_create_ticket')
-                .setLabel('🎫 Tạo Ticket Giao Dịch')
+                .setLabel('Tạo Ticket Giao Dịch')
+                .setEmoji({ id: '1524418392352620686', animated: true }) // Dùng setEmoji cho custom emoji ở Button
                 .setStyle(ButtonStyle.Success),
         );
 

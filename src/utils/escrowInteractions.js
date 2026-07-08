@@ -12,6 +12,7 @@ const {
 const EscrowTicket = require('../models/escrowTicket');
 const { calculateDealAmounts, formatEscrowMoney } = require('./feeCalculator');
 const { isBotAdmin } = require('./settings');
+const { createAndSendTranscript } = require('./transcript');
 const logger = require('./logger');
 
 // ─── Helpers ────────────────────────────────────────────────────────────
@@ -208,7 +209,8 @@ function buildActionButtons(ticket) {
             rows.push(row);
             break;
         }
-        case 'COMPLETED': {
+        case 'COMPLETED':
+        case 'CANCELLED': {
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('escrow_close_ticket')
@@ -218,10 +220,37 @@ function buildActionButtons(ticket) {
             rows.push(row);
             break;
         }
-        // CANCELLED — không có nút nào
     }
 
     return rows;
+}
+
+/**
+ * Cập nhật emoji trạng thái lên đầu tên kênh ticket
+ */
+async function updateTicketChannelName(channel, ticket) {
+    try {
+        const STATUS_EMOJIS = {
+            WAITING_DELIVERY: '🟢',
+            BUYER_CHECK: '🟢',     // Giữ nguyên xanh lá để tránh rate limit đổi tên
+            READY_PAYOUT: '🟢',    // Giữ nguyên xanh lá để tránh rate limit đổi tên
+            HOLDING: '🔒',
+            COMPLETED: '⭐',
+            CANCELLED: '🔴',
+        };
+        const emoji = STATUS_EMOJIS[ticket.status];
+        
+        // Tách bỏ các emoji/ký tự đặc biệt ở đầu để lấy tên gốc
+        const cleanName = channel.name.replace(/^[^a-zA-Z0-9]+/, '');
+        const newName = emoji ? `${emoji}-${cleanName}` : cleanName;
+        
+        if (channel.name !== newName) {
+            await channel.setName(newName);
+            logger.info(`[Escrow] Đổi tên kênh #${ticket.dealId} thành: ${newName}`);
+        }
+    } catch (err) {
+        logger.error(`[Escrow] Lỗi đổi tên kênh #${ticket.dealId}: ${err.message}`);
+    }
 }
 
 // ─── Cập nhật embed + nút trong kênh ticket ─────────────────────────────
@@ -229,6 +258,9 @@ function buildActionButtons(ticket) {
 async function refreshTicketMessage(channel, ticket, guild) {
     const embed = buildDealEmbed(ticket, guild);
     const components = buildActionButtons(ticket);
+
+    // Tự động cập nhật emoji trạng thái lên đầu tên kênh
+    updateTicketChannelName(channel, ticket);
 
     // Tìm tin nhắn embed đầu tiên của bot trong kênh để edit
     try {
@@ -361,6 +393,9 @@ async function handleCreateTicket(interaction) {
             buyerId: buyer.id,
             status: 'SETUP',
         });
+
+        // Cập nhật tên kênh với emoji trạng thái ban đầu
+        await updateTicketChannelName(ticketChannel, ticket);
 
         // Gửi embed ban đầu
         const embed = buildDealEmbed(ticket, guild);
@@ -565,11 +600,11 @@ async function handleStatusButton(interaction) {
                 return interaction.reply({ content: '❌ Trạng thái deal không phù hợp.', ephemeral: true });
             }
 
+            await interaction.deferUpdate();
             ticket.status = 'WAITING_DELIVERY';
             ticket.midmanId = userId;
             await ticket.save();
 
-            await interaction.deferUpdate();
             await refreshTicketMessage(interaction.channel, ticket, interaction.guild);
             await interaction.channel.send(`✅ <@${userId}> (Midman) đã xác nhận nhận tiền. Chờ <@${ticket.sellerId}> giao hàng.`);
             logger.info(`[Escrow] Deal #${ticket.dealId}: Midman ${interaction.user.tag} đã nhận tiền.`);
@@ -585,10 +620,10 @@ async function handleStatusButton(interaction) {
                 return interaction.reply({ content: '❌ Trạng thái deal không phù hợp.', ephemeral: true });
             }
 
+            await interaction.deferUpdate();
             ticket.status = 'BUYER_CHECK';
             await ticket.save();
 
-            await interaction.deferUpdate();
             await refreshTicketMessage(interaction.channel, ticket, interaction.guild);
             await interaction.channel.send(`📦 <@${ticket.sellerId}> đã giao hàng. <@${ticket.buyerId}> hãy kiểm tra và xác nhận.`);
             logger.info(`[Escrow] Deal #${ticket.dealId}: Seller đã giao hàng.`);
@@ -604,10 +639,10 @@ async function handleStatusButton(interaction) {
                 return interaction.reply({ content: '❌ Trạng thái deal không phù hợp.', ephemeral: true });
             }
 
+            await interaction.deferUpdate();
             ticket.status = 'READY_PAYOUT';
             await ticket.save();
 
-            await interaction.deferUpdate();
             await refreshTicketMessage(interaction.channel, ticket, interaction.guild);
             await interaction.channel.send(
                 `✅ <@${ticket.buyerId}> đã xác nhận hàng chuẩn.\n` +
@@ -626,10 +661,10 @@ async function handleStatusButton(interaction) {
                 return interaction.reply({ content: '❌ Trạng thái deal không phù hợp.', ephemeral: true });
             }
 
+            await interaction.deferUpdate();
             ticket.status = 'HOLDING';
             await ticket.save();
 
-            await interaction.deferUpdate();
             await refreshTicketMessage(interaction.channel, ticket, interaction.guild);
             await interaction.channel.send(
                 `🔒 <@${ticket.buyerId}> đã yêu cầu **giữ tiền (Hold)**.\n` +
@@ -648,10 +683,10 @@ async function handleStatusButton(interaction) {
                 return interaction.reply({ content: '❌ Trạng thái deal không phù hợp.', ephemeral: true });
             }
 
+            await interaction.deferUpdate();
             ticket.status = 'READY_PAYOUT';
             await ticket.save();
 
-            await interaction.deferUpdate();
             await refreshTicketMessage(interaction.channel, ticket, interaction.guild);
             await interaction.channel.send(
                 `🔓 Midman đã kết thúc hold.\n` +
@@ -670,10 +705,10 @@ async function handleStatusButton(interaction) {
                 return interaction.reply({ content: '❌ Trạng thái deal không phù hợp.', ephemeral: true });
             }
 
+            await interaction.deferUpdate();
             ticket.status = 'COMPLETED';
             await ticket.save();
 
-            await interaction.deferUpdate();
             await refreshTicketMessage(interaction.channel, ticket, interaction.guild);
             await interaction.channel.send(
                 `🎉 **Giao dịch #${ticket.dealId} đã hoàn tất!**\n` +
@@ -690,7 +725,16 @@ async function handleStatusButton(interaction) {
                 return interaction.reply({ content: '❌ Chỉ Midman mới có thể đóng kênh.', ephemeral: true });
             }
 
-            await interaction.reply({ content: '🗑️ Kênh sẽ bị xoá sau 5 giây...' });
+            const logChannelId = process.env.ESCROW_SUMMARY_CHANNEL_ID || process.env.ESCROW_HTML_CHANNEL_ID || process.env.ESCROW_ATTACHMENT_CHANNEL_ID || process.env.ESCROW_LOG_CHANNEL_ID;
+            if (logChannelId) {
+                await interaction.reply({ content: '⏳ Đang sao lưu cuộc trò chuyện và đóng kênh...' });
+                const success = await createAndSendTranscript(interaction.channel, ticket, logChannelId);
+                if (!success) {
+                    await interaction.followUp({ content: '⚠️ Gặp lỗi khi sao lưu Transcript, nhưng kênh vẫn sẽ bị xoá sau 5 giây...' });
+                }
+            } else {
+                await interaction.reply({ content: '🗑️ Kênh sẽ bị xoá sau 5 giây... (Chưa cấu hình kênh lưu trữ Transcript)' });
+            }
 
             setTimeout(async () => {
                 try {
@@ -713,10 +757,10 @@ async function handleStatusButton(interaction) {
                 return interaction.reply({ content: '❌ Deal này đã kết thúc, không thể huỷ.', ephemeral: true });
             }
 
+            await interaction.deferUpdate();
             ticket.status = 'CANCELLED';
             await ticket.save();
 
-            await interaction.deferUpdate();
             await refreshTicketMessage(interaction.channel, ticket, interaction.guild);
             await interaction.channel.send(
                 `❌ **Giao dịch #${ticket.dealId} đã bị huỷ** bởi <@${userId}>.\n` +
