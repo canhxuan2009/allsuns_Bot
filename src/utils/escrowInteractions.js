@@ -749,12 +749,26 @@ async function handleStatusButton(interaction) {
 
         // ── Huỷ Giao Dịch ───────────────────────────────────────────
         case 'escrow_cancel': {
-            // Buyer, Seller, hoặc Midman đều có thể huỷ (trừ COMPLETED)
-            if (!isBuyer && !isSeller && !isMidmanUser) {
-                return interaction.reply({ content: '❌ Bạn không có quyền huỷ deal này.', ephemeral: true });
-            }
             if (ticket.status === 'COMPLETED' || ticket.status === 'CANCELLED') {
                 return interaction.reply({ content: '❌ Deal này đã kết thúc, không thể huỷ.', ephemeral: true });
+            }
+
+            // Nếu trạng thái đã qua bước nhận tiền (đã có tiền chuyển cho Midman)
+            const isFundsHeld = !['SETUP', 'WAITING_FUNDS'].includes(ticket.status);
+
+            if (isFundsHeld) {
+                // Chỉ Midman được phép huỷ khi tiền đã được chuyển cho Midman
+                if (!isMidmanUser) {
+                    return interaction.reply({
+                        content: '❌ Midman đã giữ tiền cho giao dịch này. Chỉ Midman mới có quyền huỷ và thực hiện hoàn tiền.',
+                        ephemeral: true
+                    });
+                }
+            } else {
+                // Ở trạng thái SETUP hoặc WAITING_FUNDS, Buyer, Seller hoặc Midman đều huỷ được
+                if (!isBuyer && !isSeller && !isMidmanUser) {
+                    return interaction.reply({ content: '❌ Bạn không có quyền huỷ deal này.', ephemeral: true });
+                }
             }
 
             await interaction.deferUpdate();
