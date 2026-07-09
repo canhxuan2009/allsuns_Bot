@@ -305,7 +305,17 @@ async function handleEscrowInteraction(interaction) {
         return true;
     }
 
-    // ─── CÁC NÚT TRẠNG THÁI ────────────────────────────────────────
+    // ─── NÚT XÁC NHẬN / NHẬP LẠI SELLER ─────────────────────────
+    if (interaction.isButton() && interaction.customId === 'escrow_confirm_seller') {
+        await handleConfirmSeller(interaction);
+        return true;
+    }
+    if (interaction.isButton() && interaction.customId === 'escrow_reconfigure_seller') {
+        await handleReconfigureSeller(interaction);
+        return true;
+    }
+
+    // ─── CÁC NÚT TRẠNG THÁI ────────────────────────────────────
     const escrowButtons = [
         'escrow_funds_received',
         'escrow_delivered',
@@ -438,8 +448,8 @@ async function handleConfigureButton(interaction) {
 
     const sellerInput = new TextInputBuilder()
         .setCustomId('seller_id')
-        .setLabel('ID Người Bán (User ID Discord)')
-        .setPlaceholder('VD: 123456789012345678')
+        .setLabel('ID hoặc Username Người Bán')
+        .setPlaceholder('VD: spencer_01 hoặc 123456789012345678')
         .setStyle(TextInputStyle.Short)
         .setRequired(true);
 
@@ -495,21 +505,14 @@ async function handleConfigureSubmit(interaction) {
     }
 
     // Parse input
-    const sellerIdRaw = interaction.fields.getTextInputValue('seller_id').trim();
+    const sellerInputRaw = interaction.fields.getTextInputValue('seller_id').trim().replace(/^@/, '');
     const currencyRaw = interaction.fields.getTextInputValue('currency').trim().toUpperCase();
     const amountRaw = interaction.fields.getTextInputValue('amount').trim().replace(/[.,\s]/g, '');
     const feePayerRaw = interaction.fields.getTextInputValue('fee_payer').trim().toUpperCase();
     const description = interaction.fields.getTextInputValue('description').trim();
 
-    // Validate
+    // Validate các trường khác trước
     const errors = [];
-
-    if (!/^\d{15,20}$/.test(sellerIdRaw)) {
-        errors.push('❌ **ID Người Bán** phải là dãy số 15-20 chữ số (User ID Discord).');
-    }
-    if (sellerIdRaw === interaction.user.id) {
-        errors.push('❌ Bạn không thể tự giao dịch với chính mình.');
-    }
     if (!['VND', 'DONUT'].includes(currencyRaw)) {
         errors.push('❌ **Loại tiền** phải là `VND` hoặc `DONUT`.');
     }
@@ -520,19 +523,43 @@ async function handleConfigureSubmit(interaction) {
     if (!['BUYER', 'SELLER'].includes(feePayerRaw)) {
         errors.push('❌ **Bên chịu phí** phải là `BUYER` hoặc `SELLER`.');
     }
-
     if (errors.length > 0) {
         return interaction.editReply({ content: errors.join('\n') });
     }
 
-    // Verify seller exists in guild
+    // ── Tìm kiếm Seller: hỗ trợ cả ID và Username ──────────────
     let sellerMember;
-    try {
-        sellerMember = await interaction.guild.members.fetch(sellerIdRaw);
-    } catch {
-        return interaction.editReply({ content: '❌ Không tìm thấy người bán trong server. Kiểm tra lại User ID.' });
+    const isNumericId = /^\d{15,20}$/.test(sellerInputRaw);
+
+    if (isNumericId) {
+        // Tìm theo User ID
+        try {
+            sellerMember = await interaction.guild.members.fetch(sellerInputRaw);
+        } catch {
+            return interaction.editReply({ content: '❌ Không tìm thấy người bán với ID này trong server. Kiểm tra lại.' });
+        }
+    } else {
+        // Tìm theo Username (hoặc Display Name)
+        if (sellerInputRaw.length < 2 || sellerInputRaw.length > 32) {
+            return interaction.editReply({ content: '❌ Tên người dùng phải từ 2 đến 32 ký tự.' });
+        }
+        try {
+            const searchResults = await interaction.guild.members.fetch({ query: sellerInputRaw, limit: 5 });
+            if (searchResults.size === 0) {
+                return interaction.editReply({ content: `❌ Không tìm thấy thành viên nào có tên "**${sellerInputRaw}**" trong server.` });
+            }
+            // Ưu tiên username chính xác, sau đó lấy kết quả đầu tiên
+            sellerMember = searchResults.find(m => m.user.username.toLowerCase() === sellerInputRaw.toLowerCase())
+                        || searchResults.first();
+        } catch {
+            return interaction.editReply({ content: '❌ Lỗi khi tìm kiếm thành viên. Vui lòng thử lại.' });
+        }
     }
 
+    // Validate seller
+    if (sellerMember.id === interaction.user.id) {
+        return interaction.editReply({ content: '❌ Bạn không thể tự giao dịch với chính mình.' });
+    }
     if (sellerMember.user.bot) {
         return interaction.editReply({ content: '❌ Không thể giao dịch với bot.' });
     }
@@ -540,8 +567,8 @@ async function handleConfigureSubmit(interaction) {
     // Tính phí
     const { fee, totalToPay, netToReceive } = calculateDealAmounts(currencyRaw, amount, feePayerRaw);
 
-    // Cập nhật database
-    ticket.sellerId = sellerIdRaw;
+    // Lưu thông tin deal vào DB nhưng GIỮ trạng thái SETUP (chờ xác nhận seller)
+    ticket.sellerId = sellerMember.id;
     ticket.currency = currencyRaw;
     ticket.amount = amount;
     ticket.fee = fee;
@@ -549,12 +576,83 @@ async function handleConfigureSubmit(interaction) {
     ticket.totalToPay = totalToPay;
     ticket.netToReceive = netToReceive;
     ticket.description = description;
+    // Không chuyển sang WAITING_FUNDS — giữ SETUP cho đến khi Buyer xác nhận đúng người
+    await ticket.save();
+
+    // ── Tạo Embed xác nhận Profile Seller ───────────────────────
+    const sellerUser = sellerMember.user;
+    const createdAt = sellerUser.createdAt;
+    const accountAge = Math.floor((Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
+    const feePayerLabel = feePayerRaw === 'BUYER' ? 'Người Mua' : 'Người Bán';
+
+    const previewEmbed = new EmbedBuilder()
+        .setColor(0xf39c12)
+        .setTitle('🔍 Xác Nhận Người Bán')
+        .setDescription(
+            '**Vui lòng kiểm tra kỹ thông tin Người Bán bên dưới.**\n' +
+            'Nếu đúng người, bấm **✅ Xác Nhận**. Nếu sai, bấm **❌ Nhập Lại** để cấu hình lại.'
+        )
+        .setThumbnail(sellerUser.displayAvatarURL({ size: 256 }))
+        .addFields(
+            { name: '👤 Tên hiển thị', value: sellerMember.displayName, inline: true },
+            { name: '📛 Username', value: `@${sellerUser.username}`, inline: true },
+            { name: '🆔 User ID', value: `\`${sellerMember.id}\``, inline: true },
+            { name: '📅 Ngày tạo tài khoản', value: `<t:${Math.floor(createdAt.getTime() / 1000)}:D> (${accountAge} ngày trước)`, inline: true },
+            { name: '💰 Số tiền giao dịch', value: formatEscrowMoney(amount, currencyRaw), inline: true },
+            { name: '🧾 Phí dịch vụ', value: `${formatEscrowMoney(fee, currencyRaw)} (${feePayerLabel} trả)`, inline: true },
+            { name: '📦 Mô tả', value: description },
+        )
+        .setFooter({ text: `Deal #${ticket.dealId} • Chờ xác nhận Người Bán` })
+        .setTimestamp();
+
+    // Cảnh báo tài khoản mới (dưới 30 ngày)
+    if (accountAge < 30) {
+        previewEmbed.addFields({
+            name: '⚠️ CẢNH BÁO',
+            value: `Tài khoản này mới được tạo **${accountAge} ngày** trước. Hãy cẩn thận với các tài khoản mới!`
+        });
+    }
+
+    const confirmRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('escrow_confirm_seller')
+            .setLabel('✅ Xác Nhận - Đúng Người')
+            .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+            .setCustomId('escrow_reconfigure_seller')
+            .setLabel('❌ Nhập Lại')
+            .setStyle(ButtonStyle.Danger),
+    );
+
+    await interaction.channel.send({ embeds: [previewEmbed], components: [confirmRow] });
+    await interaction.editReply({ content: '✅ Đã tìm thấy Người Bán. Vui lòng **kiểm tra thông tin** bên dưới và bấm xác nhận.' });
+
+    logger.info(`[Escrow] Deal #${ticket.dealId}: Buyer đang xác nhận Seller @${sellerUser.username} (${sellerMember.id})`);
+}
+
+// ─── Xử Lý Nút Xác Nhận Seller ─────────────────────────────────────────
+
+async function handleConfirmSeller(interaction) {
+    const ticket = await EscrowTicket.findOne({ channelId: interaction.channel.id });
+    if (!ticket) {
+        return interaction.reply({ content: '❌ Không tìm thấy thông tin deal trong kênh này.', ephemeral: true });
+    }
+    if (ticket.buyerId !== interaction.user.id) {
+        return interaction.reply({ content: '❌ Chỉ Người Mua mới có thể xác nhận Người Bán.', ephemeral: true });
+    }
+    if (!ticket.sellerId) {
+        return interaction.reply({ content: '❌ Chưa có thông tin Người Bán để xác nhận.', ephemeral: true });
+    }
+
+    await interaction.deferUpdate();
+
+    // Chuyển trạng thái sang WAITING_FUNDS
     ticket.status = 'WAITING_FUNDS';
     await ticket.save();
 
     // Cấp quyền cho Seller vào kênh ticket
     try {
-        await interaction.channel.permissionOverwrites.create(sellerIdRaw, {
+        await interaction.channel.permissionOverwrites.create(ticket.sellerId, {
             ViewChannel: true,
             SendMessages: true,
             AttachFiles: true,
@@ -563,17 +661,57 @@ async function handleConfigureSubmit(interaction) {
         logger.error(`[Escrow] Lỗi cấp quyền cho Seller: ${err.message}`);
     }
 
-    // Refresh embed
-    await refreshTicketMessage(interaction.channel, ticket, interaction.guild);
+    // Xoá tin nhắn xác nhận preview
+    try {
+        await interaction.message.delete();
+    } catch { /* ignore */ }
 
-    await interaction.editReply({ content: '✅ Đã cấu hình deal thành công! Vui lòng chuyển tiền cho Midman.' });
+    // Refresh embed chính
+    await refreshTicketMessage(interaction.channel, ticket, interaction.guild);
 
     // Ping seller
     await interaction.channel.send({
-        content: `📢 <@${sellerIdRaw}> đã được mời vào deal **#${ticket.dealId}**.\n💰 Chờ <@${ticket.buyerId}> chuyển **${formatEscrowMoney(totalToPay, currencyRaw)}** cho Midman.`,
+        content: `📢 <@${ticket.sellerId}> đã được mời vào deal **#${ticket.dealId}**.\n💰 Chờ <@${ticket.buyerId}> chuyển **${formatEscrowMoney(ticket.totalToPay, ticket.currency)}** cho Midman.`,
     });
 
-    logger.info(`[Escrow] Deal #${ticket.dealId} đã cấu hình: ${amount} ${currencyRaw}, Seller: ${sellerIdRaw}, Fee: ${fee} (${feePayerRaw})`);
+    logger.info(`[Escrow] Deal #${ticket.dealId} đã xác nhận Seller: ${ticket.sellerId}, chuyển sang WAITING_FUNDS.`);
+}
+
+// ─── Xử Lý Nút Nhập Lại Seller ─────────────────────────────────────────
+
+async function handleReconfigureSeller(interaction) {
+    const ticket = await EscrowTicket.findOne({ channelId: interaction.channel.id });
+    if (!ticket) {
+        return interaction.reply({ content: '❌ Không tìm thấy thông tin deal trong kênh này.', ephemeral: true });
+    }
+    if (ticket.buyerId !== interaction.user.id) {
+        return interaction.reply({ content: '❌ Chỉ Người Mua mới có thể thao tác này.', ephemeral: true });
+    }
+
+    await interaction.deferUpdate();
+
+    // Reset thông tin seller tạm
+    ticket.sellerId = null;
+    ticket.amount = 0;
+    ticket.fee = 0;
+    ticket.totalToPay = 0;
+    ticket.netToReceive = 0;
+    ticket.description = '';
+    await ticket.save();
+
+    // Xoá tin nhắn preview
+    try {
+        await interaction.message.delete();
+    } catch { /* ignore */ }
+
+    // Refresh embed về trạng thái SETUP
+    await refreshTicketMessage(interaction.channel, ticket, interaction.guild);
+
+    await interaction.channel.send({
+        content: `🔄 <@${ticket.buyerId}> đã chọn nhập lại thông tin. Bấm **⚙️ Cấu Hình Giao Dịch** để điền lại.`,
+    });
+
+    logger.info(`[Escrow] Deal #${ticket.dealId}: Buyer đã chọn nhập lại thông tin Seller.`);
 }
 
 // ─── Xử Lý Các Nút Trạng Thái ──────────────────────────────────────────
