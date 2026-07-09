@@ -15,6 +15,10 @@ const { isBotAdmin } = require('./settings');
 const { createAndSendTranscript } = require('./transcript');
 const logger = require('./logger');
 
+// Lưu trữ tạm thời thông tin deal đang chờ Buyer xác nhận Seller (trước khi tạo kênh)
+// Key: "guildId:buyerId" → Value: { sellerId, currency, amount, fee, ... }
+const pendingDeals = new Map();
+
 // ─── Helpers ────────────────────────────────────────────────────────────
 
 /**
@@ -82,9 +86,7 @@ function buildDealEmbed(ticket, guild) {
     // Hiển thị hướng dẫn trạng thái hiện tại
     let statusNote = '';
     switch (ticket.status) {
-        case 'SETUP':
-            statusNote = 'Người mua hãy bấm **Cấu Hình Giao Dịch** để điền thông tin deal.';
-            break;
+
         case 'WAITING_FUNDS':
             statusNote = `Chờ <@${ticket.buyerId}> chuyển **${formatEscrowMoney(ticket.totalToPay, ticket.currency)}** cho Midman.`;
             break;
@@ -121,20 +123,7 @@ function buildActionButtons(ticket) {
     const rows = [];
 
     switch (ticket.status) {
-        case 'SETUP': {
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId('escrow_configure')
-                    .setLabel('⚙️ Cấu Hình Giao Dịch')
-                    .setStyle(ButtonStyle.Primary),
-                new ButtonBuilder()
-                    .setCustomId('escrow_cancel')
-                    .setLabel('❌ Huỷ')
-                    .setStyle(ButtonStyle.Danger),
-            );
-            rows.push(row);
-            break;
-        }
+
         case 'WAITING_FUNDS': {
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
@@ -293,11 +282,7 @@ async function handleEscrowInteraction(interaction) {
         return true;
     }
 
-    // ─── NÚT CẤU HÌNH ──────────────────────────────────────────────
-    if (interaction.isButton() && interaction.customId === 'escrow_configure') {
-        await handleConfigureButton(interaction);
-        return true;
-    }
+
 
     // ─── MODAL SUBMIT ───────────────────────────────────────────────
     if (interaction.isModalSubmit() && interaction.customId === 'escrow_config_modal') {
@@ -335,113 +320,9 @@ async function handleEscrowInteraction(interaction) {
     return false; // Không phải interaction của escrow
 }
 
-// ─── Tạo Ticket Mới ────────────────────────────────────────────────────
+// ─── Tạo Ticket — Hiển thị Modal ngay tại kênh Panel ───────────────────
 
 async function handleCreateTicket(interaction) {
-    await interaction.deferReply({ ephemeral: true });
-
-    const guild = interaction.guild;
-    const buyer = interaction.member;
-    const categoryId = process.env.ESCROW_CATEGORY_ID;
-
-    // Sinh dealId duy nhất
-    let dealId;
-    let attempts = 0;
-    do {
-        dealId = generateDealId();
-        const existing = await EscrowTicket.findOne({ guildId: guild.id, dealId });
-        if (!existing) break;
-        attempts++;
-    } while (attempts < 10);
-
-    if (attempts >= 10) {
-        return interaction.editReply({ content: '❌ Không thể tạo mã deal. Vui lòng thử lại!' });
-    }
-
-    // Tạo kênh ticket
-    try {
-        const channelOptions = {
-            name: `deal-${buyer.displayName.toLowerCase().replace(/[^a-z0-9]/g, '')}-${dealId.toLowerCase()}`,
-            type: ChannelType.GuildText,
-            permissionOverwrites: [
-                {
-                    id: guild.id, // @everyone
-                    deny: [PermissionFlagsBits.ViewChannel],
-                },
-                {
-                    id: buyer.id,
-                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles],
-                },
-                {
-                    id: interaction.client.user.id,
-                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ManageChannels],
-                },
-            ],
-        };
-
-        // Thêm Midman role vào quyền xem
-        const midmanRoleId = process.env.ESCROW_MIDMAN_ROLE_ID;
-        if (midmanRoleId) {
-            channelOptions.permissionOverwrites.push({
-                id: midmanRoleId,
-                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages],
-            });
-        }
-
-        // Nếu có category
-        if (categoryId) {
-            channelOptions.parent = categoryId;
-        }
-
-        const ticketChannel = await guild.channels.create(channelOptions);
-
-        // Lưu vào database
-        const ticket = await EscrowTicket.create({
-            guildId: guild.id,
-            channelId: ticketChannel.id,
-            dealId,
-            buyerId: buyer.id,
-            status: 'SETUP',
-        });
-
-        // Cập nhật tên kênh với emoji trạng thái ban đầu
-        await updateTicketChannelName(ticketChannel, ticket);
-
-        // Gửi embed ban đầu
-        const embed = buildDealEmbed(ticket, guild);
-        const components = buildActionButtons(ticket);
-
-        const midmanPing = midmanRoleId ? `<@&${midmanRoleId}>` : '';
-        await ticketChannel.send({
-            content: `🎫 **Ticket Giao Dịch Mới!**\n${buyer} đã tạo yêu cầu trung gian. ${midmanPing}\n\nBấm **⚙️ Cấu Hình Giao Dịch** để bắt đầu.`,
-            embeds: [embed],
-            components,
-        });
-
-        await interaction.editReply({
-            content: `✅ Đã tạo ticket giao dịch thành công!\n👉 Vào <#${ticketChannel.id}> để thiết lập deal.`,
-        });
-
-        logger.info(`[Escrow] Ticket #${dealId} được tạo bởi ${buyer.user.tag} trong guild ${guild.name}`);
-
-    } catch (err) {
-        logger.error(`[Escrow] Lỗi tạo ticket: ${err.message}`);
-        await interaction.editReply({ content: `❌ Không thể tạo ticket: ${err.message}` });
-    }
-}
-
-// ─── Hiển thị Modal Cấu Hình ───────────────────────────────────────────
-
-async function handleConfigureButton(interaction) {
-    // Chỉ Buyer mới được cấu hình
-    const ticket = await EscrowTicket.findOne({ channelId: interaction.channel.id });
-    if (!ticket) {
-        return interaction.reply({ content: '❌ Không tìm thấy thông tin deal trong kênh này.', ephemeral: true });
-    }
-    if (ticket.buyerId !== interaction.user.id) {
-        return interaction.reply({ content: '❌ Chỉ Người Mua mới có thể cấu hình deal này.', ephemeral: true });
-    }
-
     const modal = new ModalBuilder()
         .setCustomId('escrow_config_modal')
         .setTitle('⚙️ Cấu Hình Giao Dịch Trung Gian');
@@ -494,15 +375,10 @@ async function handleConfigureButton(interaction) {
     await interaction.showModal(modal);
 }
 
-// ─── Xử Lý Modal Submit ────────────────────────────────────────────────
+// ─── Xử Lý Modal Submit (tại kênh Panel — ephemeral) ───────────────────
 
 async function handleConfigureSubmit(interaction) {
     await interaction.deferReply({ ephemeral: true });
-
-    const ticket = await EscrowTicket.findOne({ channelId: interaction.channel.id });
-    if (!ticket) {
-        return interaction.editReply({ content: '❌ Không tìm thấy thông tin deal.' });
-    }
 
     // Parse input
     const sellerInputRaw = interaction.fields.getTextInputValue('seller_id').trim().replace(/^@/, '');
@@ -511,7 +387,7 @@ async function handleConfigureSubmit(interaction) {
     const feePayerRaw = interaction.fields.getTextInputValue('fee_payer').trim().toUpperCase();
     const description = interaction.fields.getTextInputValue('description').trim();
 
-    // Validate các trường khác trước
+    // Validate
     const errors = [];
     if (!['VND', 'DONUT'].includes(currencyRaw)) {
         errors.push('❌ **Loại tiền** phải là `VND` hoặc `DONUT`.');
@@ -532,14 +408,12 @@ async function handleConfigureSubmit(interaction) {
     const isNumericId = /^\d{15,20}$/.test(sellerInputRaw);
 
     if (isNumericId) {
-        // Tìm theo User ID
         try {
             sellerMember = await interaction.guild.members.fetch(sellerInputRaw);
         } catch {
-            return interaction.editReply({ content: '❌ Không tìm thấy người bán với ID này trong server. Kiểm tra lại.' });
+            return interaction.editReply({ content: '❌ Không tìm thấy người bán với ID này trong server.' });
         }
     } else {
-        // Tìm theo Username (hoặc Display Name)
         if (sellerInputRaw.length < 2 || sellerInputRaw.length > 32) {
             return interaction.editReply({ content: '❌ Tên người dùng phải từ 2 đến 32 ký tự.' });
         }
@@ -548,7 +422,6 @@ async function handleConfigureSubmit(interaction) {
             if (searchResults.size === 0) {
                 return interaction.editReply({ content: `❌ Không tìm thấy thành viên nào có tên "**${sellerInputRaw}**" trong server.` });
             }
-            // Ưu tiên username chính xác, sau đó lấy kết quả đầu tiên
             sellerMember = searchResults.find(m => m.user.username.toLowerCase() === sellerInputRaw.toLowerCase())
                         || searchResults.first();
         } catch {
@@ -556,7 +429,6 @@ async function handleConfigureSubmit(interaction) {
         }
     }
 
-    // Validate seller
     if (sellerMember.id === interaction.user.id) {
         return interaction.editReply({ content: '❌ Bạn không thể tự giao dịch với chính mình.' });
     }
@@ -567,19 +439,32 @@ async function handleConfigureSubmit(interaction) {
     // Tính phí
     const { fee, totalToPay, netToReceive } = calculateDealAmounts(currencyRaw, amount, feePayerRaw);
 
-    // Lưu thông tin deal vào DB nhưng GIỮ trạng thái SETUP (chờ xác nhận seller)
-    ticket.sellerId = sellerMember.id;
-    ticket.currency = currencyRaw;
-    ticket.amount = amount;
-    ticket.fee = fee;
-    ticket.feePayer = feePayerRaw;
-    ticket.totalToPay = totalToPay;
-    ticket.netToReceive = netToReceive;
-    ticket.description = description;
-    // Không chuyển sang WAITING_FUNDS — giữ SETUP cho đến khi Buyer xác nhận đúng người
-    await ticket.save();
+    // Lưu vào pendingDeals Map (chờ Buyer xác nhận trước khi tạo kênh)
+    const pendingKey = `${interaction.guild.id}:${interaction.user.id}`;
+    pendingDeals.set(pendingKey, {
+        guildId: interaction.guild.id,
+        buyerId: interaction.user.id,
+        buyerTag: interaction.user.tag,
+        sellerId: sellerMember.id,
+        currency: currencyRaw,
+        amount,
+        fee,
+        feePayer: feePayerRaw,
+        totalToPay,
+        netToReceive,
+        description,
+        clientUser: interaction.client.user,
+    });
 
-    // ── Tạo Embed xác nhận Profile Seller ───────────────────────
+    // Tự xoá sau 15 phút nếu không xác nhận (tránh rò rỉ bộ nhớ)
+    setTimeout(() => {
+        if (pendingDeals.has(pendingKey)) {
+            pendingDeals.delete(pendingKey);
+            logger.info(`[Escrow] Pending deal của user ${interaction.user.id} đã hết hạn (15 phút).`);
+        }
+    }, 15 * 60 * 1000);
+
+    // ── Tạo Embed preview Seller (ephemeral — chỉ Buyer thấy) ───
     const sellerUser = sellerMember.user;
     const createdAt = sellerUser.createdAt;
     const accountAge = Math.floor((Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
@@ -602,10 +487,9 @@ async function handleConfigureSubmit(interaction) {
             { name: '🧾 Phí dịch vụ', value: `${formatEscrowMoney(fee, currencyRaw)} (${feePayerLabel} trả)`, inline: true },
             { name: '📦 Mô tả', value: description },
         )
-        .setFooter({ text: `Deal #${ticket.dealId} • Chờ xác nhận Người Bán` })
+        .setFooter({ text: 'Chờ xác nhận Người Bán • Hết hạn sau 15 phút' })
         .setTimestamp();
 
-    // Cảnh báo tài khoản mới (dưới 30 ngày)
     if (accountAge < 30) {
         previewEmbed.addFields({
             name: '⚠️ CẢNH BÁO',
@@ -624,95 +508,154 @@ async function handleConfigureSubmit(interaction) {
             .setStyle(ButtonStyle.Danger),
     );
 
-    await interaction.channel.send({ embeds: [previewEmbed], components: [confirmRow] });
-    await interaction.editReply({ content: '✅ Đã tìm thấy Người Bán. Vui lòng **kiểm tra thông tin** bên dưới và bấm xác nhận.' });
+    // Gửi ephemeral (chỉ Buyer thấy tại kênh panel)
+    await interaction.editReply({ embeds: [previewEmbed], components: [confirmRow] });
 
-    logger.info(`[Escrow] Deal #${ticket.dealId}: Buyer đang xác nhận Seller @${sellerUser.username} (${sellerMember.id})`);
+    logger.info(`[Escrow] ${interaction.user.tag} đang xác nhận Seller @${sellerUser.username} (${sellerMember.id}) tại panel`);
 }
 
-// ─── Xử Lý Nút Xác Nhận Seller ─────────────────────────────────────────
+// ─── Xử Lý Nút Xác Nhận Seller → Tạo Kênh Ticket ──────────────────────
 
 async function handleConfirmSeller(interaction) {
-    const ticket = await EscrowTicket.findOne({ channelId: interaction.channel.id });
-    if (!ticket) {
-        return interaction.reply({ content: '❌ Không tìm thấy thông tin deal trong kênh này.', ephemeral: true });
-    }
-    if (ticket.buyerId !== interaction.user.id) {
-        return interaction.reply({ content: '❌ Chỉ Người Mua mới có thể xác nhận Người Bán.', ephemeral: true });
-    }
-    if (!ticket.sellerId) {
-        return interaction.reply({ content: '❌ Chưa có thông tin Người Bán để xác nhận.', ephemeral: true });
-    }
+    const pendingKey = `${interaction.guild.id}:${interaction.user.id}`;
+    const dealData = pendingDeals.get(pendingKey);
 
-    await interaction.deferUpdate();
-
-    // Chuyển trạng thái sang WAITING_FUNDS
-    ticket.status = 'WAITING_FUNDS';
-    await ticket.save();
-
-    // Cấp quyền cho Seller vào kênh ticket
-    try {
-        await interaction.channel.permissionOverwrites.create(ticket.sellerId, {
-            ViewChannel: true,
-            SendMessages: true,
-            AttachFiles: true,
+    if (!dealData) {
+        return interaction.update({
+            content: '❌ Phiên thiết lập đã hết hạn hoặc không tồn tại.\nVui lòng bấm lại nút **Tạo Ticket Giao Dịch** trên panel để bắt đầu lại.',
+            embeds: [],
+            components: [],
         });
-    } catch (err) {
-        logger.error(`[Escrow] Lỗi cấp quyền cho Seller: ${err.message}`);
     }
 
-    // Xoá tin nhắn xác nhận preview
-    try {
-        await interaction.message.delete();
-    } catch { /* ignore */ }
-
-    // Refresh embed chính
-    await refreshTicketMessage(interaction.channel, ticket, interaction.guild);
-
-    // Ping seller
-    await interaction.channel.send({
-        content: `📢 <@${ticket.sellerId}> đã được mời vào deal **#${ticket.dealId}**.\n💰 Chờ <@${ticket.buyerId}> chuyển **${formatEscrowMoney(ticket.totalToPay, ticket.currency)}** cho Midman.`,
+    // Cập nhật ephemeral: đang xử lý
+    await interaction.update({
+        content: '⏳ Đang tạo kênh giao dịch...',
+        embeds: [],
+        components: [],
     });
 
-    logger.info(`[Escrow] Deal #${ticket.dealId} đã xác nhận Seller: ${ticket.sellerId}, chuyển sang WAITING_FUNDS.`);
+    const guild = interaction.guild;
+    const buyer = interaction.member;
+    const categoryId = process.env.ESCROW_CATEGORY_ID;
+
+    // Sinh dealId duy nhất
+    let dealId;
+    let attempts = 0;
+    do {
+        dealId = generateDealId();
+        const existing = await EscrowTicket.findOne({ guildId: guild.id, dealId });
+        if (!existing) break;
+        attempts++;
+    } while (attempts < 10);
+
+    if (attempts >= 10) {
+        pendingDeals.delete(pendingKey);
+        return interaction.editReply({ content: '❌ Không thể tạo mã deal. Vui lòng thử lại!' });
+    }
+
+    try {
+        // Tạo kênh ticket (Buyer + Seller + Bot + Midman Role đều có quyền từ đầu)
+        const channelOptions = {
+            name: `deal-${buyer.displayName.toLowerCase().replace(/[^a-z0-9]/g, '')}-${dealId.toLowerCase()}`,
+            type: ChannelType.GuildText,
+            permissionOverwrites: [
+                {
+                    id: guild.id, // @everyone
+                    deny: [PermissionFlagsBits.ViewChannel],
+                },
+                {
+                    id: buyer.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles],
+                },
+                {
+                    id: dealData.sellerId,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles],
+                },
+                {
+                    id: interaction.client.user.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ManageChannels],
+                },
+            ],
+        };
+
+        const midmanRoleId = process.env.ESCROW_MIDMAN_ROLE_ID;
+        if (midmanRoleId) {
+            channelOptions.permissionOverwrites.push({
+                id: midmanRoleId,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages],
+            });
+        }
+
+        if (categoryId) {
+            channelOptions.parent = categoryId;
+        }
+
+        const ticketChannel = await guild.channels.create(channelOptions);
+
+        // Lưu vào database — trạng thái WAITING_FUNDS ngay từ đầu (bỏ qua SETUP)
+        const ticket = await EscrowTicket.create({
+            guildId: guild.id,
+            channelId: ticketChannel.id,
+            dealId,
+            buyerId: buyer.id,
+            sellerId: dealData.sellerId,
+            currency: dealData.currency,
+            amount: dealData.amount,
+            fee: dealData.fee,
+            feePayer: dealData.feePayer,
+            totalToPay: dealData.totalToPay,
+            netToReceive: dealData.netToReceive,
+            description: dealData.description,
+            status: 'WAITING_FUNDS',
+        });
+
+        // Cập nhật tên kênh với emoji trạng thái
+        await updateTicketChannelName(ticketChannel, ticket);
+
+        // Gửi embed deal trong kênh mới
+        const embed = buildDealEmbed(ticket, guild);
+        const components = buildActionButtons(ticket);
+
+        const midmanPing = midmanRoleId ? `<@&${midmanRoleId}>` : '';
+        await ticketChannel.send({
+            content: `🎫 **Ticket Giao Dịch Mới — #${dealId}**\n${buyer} (Buyer) và <@${dealData.sellerId}> (Seller) ${midmanPing}\n\n💰 Chờ ${buyer} chuyển **${formatEscrowMoney(dealData.totalToPay, dealData.currency)}** cho Midman.`,
+            embeds: [embed],
+            components,
+        });
+
+        // Cập nhật tin nhắn ephemeral cho Buyer
+        await interaction.editReply({
+            content: `✅ Đã tạo ticket giao dịch thành công!\n👉 Vào <#${ticketChannel.id}> để tiếp tục giao dịch.`,
+        });
+
+        // Xoá pending deal
+        pendingDeals.delete(pendingKey);
+
+        logger.info(`[Escrow] Ticket #${dealId} được tạo bởi ${buyer.user.tag}, Seller: ${dealData.sellerId}, ${dealData.amount} ${dealData.currency}`);
+
+    } catch (err) {
+        logger.error(`[Escrow] Lỗi tạo ticket: ${err.message}`);
+        pendingDeals.delete(pendingKey);
+        await interaction.editReply({ content: `❌ Không thể tạo ticket: ${err.message}` });
+    }
 }
 
-// ─── Xử Lý Nút Nhập Lại Seller ─────────────────────────────────────────
+// ─── Xử Lý Nút Nhập Lại ────────────────────────────────────────────────
 
 async function handleReconfigureSeller(interaction) {
-    const ticket = await EscrowTicket.findOne({ channelId: interaction.channel.id });
-    if (!ticket) {
-        return interaction.reply({ content: '❌ Không tìm thấy thông tin deal trong kênh này.', ephemeral: true });
-    }
-    if (ticket.buyerId !== interaction.user.id) {
-        return interaction.reply({ content: '❌ Chỉ Người Mua mới có thể thao tác này.', ephemeral: true });
-    }
+    const pendingKey = `${interaction.guild.id}:${interaction.user.id}`;
+    pendingDeals.delete(pendingKey);
 
-    await interaction.deferUpdate();
-
-    // Reset thông tin seller tạm
-    ticket.sellerId = null;
-    ticket.amount = 0;
-    ticket.fee = 0;
-    ticket.totalToPay = 0;
-    ticket.netToReceive = 0;
-    ticket.description = '';
-    await ticket.save();
-
-    // Xoá tin nhắn preview
-    try {
-        await interaction.message.delete();
-    } catch { /* ignore */ }
-
-    // Refresh embed về trạng thái SETUP
-    await refreshTicketMessage(interaction.channel, ticket, interaction.guild);
-
-    await interaction.channel.send({
-        content: `🔄 <@${ticket.buyerId}> đã chọn nhập lại thông tin. Bấm **⚙️ Cấu Hình Giao Dịch** để điền lại.`,
+    await interaction.update({
+        content: '🔄 Đã huỷ thiết lập. Bấm lại nút **Tạo Ticket Giao Dịch** trên panel để bắt đầu lại.',
+        embeds: [],
+        components: [],
     });
 
-    logger.info(`[Escrow] Deal #${ticket.dealId}: Buyer đã chọn nhập lại thông tin Seller.`);
+    logger.info(`[Escrow] ${interaction.user.tag} đã huỷ thiết lập deal tại panel.`);
 }
+
 
 // ─── Xử Lý Các Nút Trạng Thái ──────────────────────────────────────────
 
