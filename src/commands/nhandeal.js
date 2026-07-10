@@ -58,12 +58,17 @@ module.exports = {
         if (ticket.currency === 'VND') {
             const totalAmount = ticket.totalToPay;
 
+            // Tách lấy từ đầu tiên của tên ngân hàng để lấy mã viết tắt (VD: "MB - Ngân hàng..." -> "mb")
+            const shortBank = midmanConfig.bankName.split(/[\s-]/)[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+            // Dọn sạch khoảng trắng trong số tài khoản
+            const cleanAccNumber = midmanConfig.accountNumber.replace(/\s+/g, '');
+
             // Ưu tiên QR tĩnh nếu có; nếu không, tự tạo VietQR động
             let qrImageUrl;
             if (midmanConfig.qrUrl) {
                 qrImageUrl = midmanConfig.qrUrl;
             } else {
-                qrImageUrl = `https://img.vietqr.io/image/${midmanConfig.bankName}-${midmanConfig.accountNumber}-print.png?amount=${totalAmount}&addInfo=${encodeURIComponent(ticket.dealId)}&accountName=${encodeURIComponent(midmanConfig.accountHolder)}`;
+                qrImageUrl = `https://img.vietqr.io/image/${encodeURIComponent(shortBank)}-${encodeURIComponent(cleanAccNumber)}-print.png?amount=${totalAmount}&addInfo=${encodeURIComponent(ticket.dealId)}&accountName=${encodeURIComponent(midmanConfig.accountHolder)}`;
             }
 
             const embed = new EmbedBuilder()
