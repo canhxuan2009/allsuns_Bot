@@ -438,14 +438,60 @@ client.on(Events.MessageCreate, async (message) => {
     }
 });
 
-// Bot ready
-client.once(Events.ClientReady, (readyClient) => {
+// Bot ready & Tự động đồng bộ Slash Commands
+client.once(Events.ClientReady, async (readyClient) => {
     logger.info('━'.repeat(50));
     logger.info(`Bot đã online: ${readyClient.user.tag}`);
     logger.info(`Đang phục vụ ${readyClient.guilds.cache.size} server(s)`);
     logger.info(`${client.commands.size} command(s) đã load`);
     logger.info(`File log: ${logger.currentFile}`);
     logger.info('━'.repeat(50));
+
+    // Tự động dọn dẹp và đồng bộ lại Slash Commands lên Discord
+    try {
+        const { REST, Routes } = require('discord.js');
+        const rest = new REST().setToken(process.env.DISCORD_TOKEN);
+        
+        // Chuẩn bị danh sách lệnh hiện tại
+        const commands = [];
+        const commandsPath = path.join(__dirname, 'commands');
+        const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+        
+        for (const file of commandFiles) {
+            const filePath = path.join(commandsPath, file);
+            const command = require(filePath);
+            if ('data' in command) {
+                commands.push(command.data.toJSON());
+            }
+        }
+
+        logger.info(`[SlashCommands] Đang đồng bộ và dọn dẹp lệnh...`);
+
+        // 1. Xoá sạch các lệnh Global cũ (tránh trùng lặp và lệnh rác)
+        await rest.put(
+            Routes.applicationCommands(readyClient.user.id),
+            { body: [] }
+        );
+
+        // 2. Đăng ký lại danh sách lệnh mới nhất
+        if (process.env.GUILD_ID) {
+            // Chế độ Dev / Server riêng (cập nhật ngay lập tức)
+            await rest.put(
+                Routes.applicationGuildCommands(readyClient.user.id, process.env.GUILD_ID),
+                { body: commands }
+            );
+            logger.info(`[SlashCommands] ✅ Đã xoá sạch lệnh cũ và đăng ký mới ${commands.length} lệnh cho Server ${process.env.GUILD_ID}`);
+        } else {
+            // Chế độ Global (cập nhật toàn hệ thống)
+            await rest.put(
+                Routes.applicationCommands(readyClient.user.id),
+                { body: commands }
+            );
+            logger.info(`[SlashCommands] ✅ Đã xoá sạch lệnh cũ và đăng ký mới ${commands.length} lệnh Globally`);
+        }
+    } catch (err) {
+        logger.error(`[SlashCommands] Lỗi tự động đồng bộ lệnh: ${err.message}`);
+    }
 });
 
 // ─── Kết nối MongoDB rồi đăng nhập Discord ─────────────────────────────
