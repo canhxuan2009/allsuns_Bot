@@ -624,6 +624,9 @@ async function handleConfirmSeller(interaction) {
             components,
         });
 
+        // Gửi tin nhắn hướng dẫn riêng biệt để tránh bị trôi
+        await ticketChannel.send(`💡 **Mẹo:** Trong lúc trò chuyện, nếu bảng điều khiển ở trên bị tin nhắn chat làm trôi đi, bạn hãy gõ lệnh \`/panel\` để kéo nó xuống dưới cùng nhé!`);
+
         // Cập nhật tin nhắn ephemeral cho Buyer
         await interaction.editReply({
             content: `✅ Đã tạo ticket giao dịch thành công!\n👉 Vào <#${ticketChannel.id}> để tiếp tục giao dịch.`,
@@ -869,4 +872,6 @@ async function handleStatusButton(interaction) {
 
 module.exports = {
     handleEscrowInteraction,
+    buildDealEmbed,
+    buildActionButtons,
 };
