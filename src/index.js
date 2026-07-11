@@ -494,6 +494,44 @@ client.once(Events.ClientReady, async (readyClient) => {
     }
 });
 
+// ─── Tự động nhắc nhở gõ /panel sau mỗi 15 tin nhắn trong kênh Ticket ───
+const escrowMessageCounters = new Map();
+
+client.on(Events.MessageCreate, async (message) => {
+    if (!message.guild || message.author.bot) return;
+
+    // Bỏ qua nếu kênh không nằm trong category giao dịch trung gian
+    const escrowCategoryId = process.env.ESCROW_CATEGORY_ID;
+    if (!escrowCategoryId || message.channel.parentId !== escrowCategoryId) return;
+
+    try {
+        let count = escrowMessageCounters.get(message.channel.id) || 0;
+        count++;
+
+        if (count >= 15) {
+            // Xoá tin mẹo cũ của bot trong kênh (quét 50 tin gần nhất)
+            const messages = await message.channel.messages.fetch({ limit: 50 });
+            const oldTip = messages.find(m => 
+                m.author.id === message.client.user.id && 
+                m.content.includes('gõ lệnh `/panel` để kéo nó xuống')
+            );
+            if (oldTip) {
+                await oldTip.delete().catch(() => {});
+            }
+
+            // Gửi tin mẹo mới xuống cuối
+            await message.channel.send(`💡 **Mẹo:** Trong lúc trò chuyện, nếu bảng điều khiển ở trên bị tin nhắn chat làm trôi đi, bạn hãy gõ lệnh \`/panel\` để kéo nó xuống dưới cùng nhé!`);
+            
+            // Reset bộ đếm
+            escrowMessageCounters.set(message.channel.id, 0);
+        } else {
+            escrowMessageCounters.set(message.channel.id, count);
+        }
+    } catch (err) {
+        logger.error(`[Escrow-Tip] Lỗi khi đếm tin nhắn và gửi gợi ý: ${err.message}`);
+    }
+});
+
 // ─── Kết nối MongoDB rồi đăng nhập Discord ─────────────────────────────
 async function start() {
     try {
