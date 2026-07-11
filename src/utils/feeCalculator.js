@@ -9,13 +9,13 @@ const logger = require('./logger');
  */
 const FEE_TIERS = {
     VND: [
-        { maxAmount: 100_000,   type: 'fixed',   value: 5_000 },
-        { maxAmount: 500_000,   type: 'percent', value: 0.05 },
-        { maxAmount: Infinity,  type: 'percent', value: 0.03, cap: 50_000 },
+        { maxAmount: 99_999,    type: 'fixed',   value: 5_000 },   // Dưới 100,000 VND
+        { maxAmount: 1_000_000, type: 'fixed',   value: 10_000 },  // Từ 100,000đ - 1,000,000 VND
+        { maxAmount: Infinity,  type: 'percent', value: 0.03, cap: 50_000 }, // Trên 1,000,000 VND (3% tối đa 50k)
     ],
     DONUT: [
-        { maxAmount: 1_000_000, type: 'fixed',   value: 50_000 },
-        { maxAmount: Infinity,  type: 'percent', value: 0.02 },
+        { maxAmount: 999_999,   type: 'fixed',   value: 0 },       // Dưới 1,000,000 Donut (phí 0)
+        { maxAmount: Infinity,  type: 'percent', value: 0.03 },    // Từ 1,000,000 Donut trở lên (3%)
     ],
 };
 
@@ -33,7 +33,7 @@ function calculateEscrowFee(currency, amount) {
     }
 
     for (const tier of tiers) {
-        if (amount < tier.maxAmount || tier.maxAmount === Infinity) {
+        if (amount <= tier.maxAmount || tier.maxAmount === Infinity) {
             if (tier.type === 'fixed') {
                 return tier.value;
             }
