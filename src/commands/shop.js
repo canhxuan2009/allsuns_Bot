@@ -6,7 +6,7 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('shop')
         .setDescription('Mở bảng điều khiển Shop Bán Tài Khoản (Admin Only)'),
-    
+
     async execute(interaction) {
         // Chỉ cho phép admin sử dụng
         if (!isBotAdmin(interaction.guildId, interaction.user.id)) {
@@ -20,7 +20,7 @@ module.exports = {
             .setColor(0x3498db)
             .setTitle('🛒 Shop Tài Khoản Premium')
             .setDescription('Chào mừng bạn đến với Shop! Vui lòng chọn sản phẩm bạn muốn mua từ menu bên dưới.\n\nSau khi chọn, hệ thống sẽ hướng dẫn bạn tạo ticket thanh toán và nhận hàng.')
-            .setImage('https://i.imgur.com/k2e4x0h.png') // Bạn có thể thay đổi ảnh này nếu muốn
+            .setImage('https://cdn.discordapp.com/attachments/1524083621512613918/1524084097637679205/image.png?ex=6a54642c&is=6a5312ac&hm=2bd5e8ac7a575a1c4a9db6de5676b23d51766f63f2535e55704a6324510b43f8&') // Bạn có thể thay đổi ảnh này nếu muốn
             .setFooter({ text: 'AllSuns Shop System' })
             .setTimestamp();
 
