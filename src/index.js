@@ -294,6 +294,10 @@ const IMAGE_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif
 // Lưu theo guildId:userId để tránh xung đột giữa các server
 const flaggedScamUsers = new Set();
 
+// Map lưu thời gian quét ảnh gần nhất của mỗi user để làm cooldown (10 phút)
+const imageModerationCooldowns = new Map();
+const MODERATION_COOLDOWN_MS = 10 * 60 * 1000; // 10 phút
+
 client.on(Events.MessageCreate, async (message) => {
     // Bỏ qua nếu chưa cấu hình hoặc không phải tin nhắn trong server
     if (!MODERATION_MEMBER_ROLE_ID || !message.guild || message.author.bot) return;
@@ -320,6 +324,24 @@ client.on(Events.MessageCreate, async (message) => {
         att => att.contentType && IMAGE_CONTENT_TYPES.includes(att.contentType.split(';')[0])
     );
     if (imageAttachments.size === 0) return;
+
+    // ── Kiểm tra Cooldown 10 phút ──────────────────────────────────
+    const cooldownKey = `${message.guild.id}:${message.author.id}`;
+    const now = Date.now();
+    const lastScan = imageModerationCooldowns.get(cooldownKey);
+    if (lastScan && now - lastScan < MODERATION_COOLDOWN_MS) {
+        const remaining = Math.ceil((MODERATION_COOLDOWN_MS - (now - lastScan)) / 1000);
+        logger.info(`[ImageMod] Bỏ qua quét ảnh từ ${message.author.tag} (cooldown còn ${remaining} giây)`);
+        return;
+    }
+
+    // Thiết lập Cooldown và tự động xoá khỏi Map khi hết hạn
+    imageModerationCooldowns.set(cooldownKey, now);
+    setTimeout(() => {
+        if (imageModerationCooldowns.get(cooldownKey) === now) {
+            imageModerationCooldowns.delete(cooldownKey);
+        }
+    }, MODERATION_COOLDOWN_MS);
 
     // Phân tích từng ảnh
     for (const [, attachment] of imageAttachments) {
