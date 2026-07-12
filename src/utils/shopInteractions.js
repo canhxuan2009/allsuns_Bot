@@ -281,6 +281,8 @@ async function handleShopInteraction(interaction) {
             const embed = buildShopEmbed(ticket, guild);
             const components = buildShopButtons(ticket);
 
+            const qrUrl = `https://img.vietqr.io/image/${process.env.ESCROW_BANK_ID}-${process.env.ESCROW_BANK_ACCOUNT}-compact.png?amount=${product.price}&addInfo=${ticketId}&accountName=${encodeURIComponent(process.env.ESCROW_BANK_NAME || '')}`;
+
             const bankInfo = new EmbedBuilder()
                 .setColor(0x3498db)
                 .setTitle('💳 Thông Tin Thanh Toán')
@@ -291,7 +293,7 @@ async function handleShopInteraction(interaction) {
                     `📝 **Nội dung CK:** \`${ticketId}\`\n\n` +
                     `*Nếu đã chuyển khoản thành công, vui lòng gửi ảnh bill vào đây và bấm nút xác nhận.*`
                 )
-                .setImage(`https://img.vietqr.io/image/${process.env.ESCROW_BANK_ID}-${process.env.ESCROW_BANK_ACCOUNT}-compact.png?amount=${product.price}&addInfo=${ticketId}&accountName=${process.env.ESCROW_BANK_NAME}`);
+                .setImage(qrUrl);
 
             await ticketChannel.send({
                 content: `🛒 **Ticket Mua Hàng — #${ticketId}**\nNgười mua: ${buyer}\nNhân viên xử lý: <@${SHOP_ADMIN_ID}>`,

@@ -18,7 +18,7 @@ module.exports = {
 
         const embed = new EmbedBuilder()
             .setColor(0x1a1c23)
-            .setDescription('# <a:VerifedTick:1525861266000711700> BẢNG GIÁ CANHXUAN PREMIUM\n <a:darkbluearrow:1525876310206054643> Nhấn vào menu bên dưới để xem chi tiết giá\n <a:darkbluearrow:1525876310206054643> Giá ưu đãi – Duyệt đơn nhanh chóng\n <a:darkbluearrow:1525876310206054643> Hỗ Trợ 24/7 – Giao Hàng Tận Tay ㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤㅤ')
+            .setDescription('# <a:VerifedTick:1525861266000711700> BẢNG GIÁ CANHXUAN PREMIUM\n <a:darkbluearrow:1525876310206054643> Nhấn vào menu bên dưới để xem chi tiết giá\n <a:darkbluearrow:1525876310206054643> Giá ưu đãi – Duyệt đơn nhanh chóng\n <a:darkbluearrow:1525876310206054643> Hỗ Trợ 24/7 – Giao Hàng Tận Tay ')
             .setImage('https://cdn.discordapp.com/attachments/1524083621512613918/1524084097637679205/image.png?ex=6a54642c&is=6a5312ac&hm=2bd5e8ac7a575a1c4a9db6de5676b23d51766f63f2535e55704a6324510b43f8&') // Bạn có thể thay đổi ảnh này nếu muốn
             .setFooter({ text: 'CanhXuan Premium' })
 
@@ -26,7 +26,7 @@ module.exports = {
             label: product.label,
             description: `${product.price.toLocaleString('vi-VN')} VND - ${product.description.substring(0, 50)}...`,
             value: product.id,
-            emoji: '📦'
+            emoji: product.emoji || '📦'
         }));
 
         const selectMenu = new StringSelectMenuBuilder()
