@@ -12,8 +12,8 @@ module.exports = [
         label: 'Tài khoản Spotify Premium (1 Tháng)',
         description: 'Nghe nhạc không quảng cáo, chất lượng cao. Thời hạn 1 tháng.',
         price: 30000,
-        emoji: '🎵',
-        image: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/19/Spotify_logo_without_text.svg/512px-Spotify_logo_without_text.svg.png'
+        emoji: '<a:spotify_GG:1525861147968798721>',
+        image: 'https://cdn.discordapp.com/attachments/1524083621512613918/1525882480824029325/so-sanh-diem-khac-biet-giua-spotify-free-va-premiu.png?ex=6a55004c&is=6a53aecc&hm=a0cc206fa6a813a378e76d7ac2fb04216cf4e70799cc53f466f11b3836044ac6&'
     },
     {
         id: 'chatgpt_plus_1m',
