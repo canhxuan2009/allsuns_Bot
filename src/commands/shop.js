@@ -28,7 +28,7 @@ module.exports = {
             label: product.label,
             description: `${product.price.toLocaleString('vi-VN')} VND - ${product.description.substring(0, 50)}...`,
             value: product.id,
-            emoji: '📦'
+            emoji: product.emoji || '📦'
         }));
 
         const selectMenu = new StringSelectMenuBuilder()

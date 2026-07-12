@@ -29,6 +29,7 @@ const STATUS_LABELS = {
 
 function buildShopEmbed(ticket, guild) {
     const statusLabel = STATUS_LABELS[ticket.status] || ticket.status;
+    const product = shopProducts.find(p => p.id === ticket.productId);
 
     const embed = new EmbedBuilder()
         .setColor(ticket.status === 'COMPLETED' ? 0x2ecc71 : ticket.status === 'CANCELLED' ? 0xe74c3c : 0xf1c40f)
@@ -36,9 +37,13 @@ function buildShopEmbed(ticket, guild) {
         .addFields(
             { name: '👤 Người Mua', value: `<@${ticket.buyerId}>`, inline: true },
             { name: '🛡️ Nhân Viên Xử Lý', value: `<@${SHOP_ADMIN_ID}>`, inline: true },
-            { name: '📦 Sản Phẩm', value: `**${ticket.productName}**`, inline: false },
+            { name: '📦 Sản Phẩm', value: `**${product && product.emoji ? product.emoji + ' ' : ''}${ticket.productName}**`, inline: false },
             { name: '💰 Số Tiền Cần Thanh Toán', value: `**${ticket.price.toLocaleString('vi-VN')} ${ticket.currency}**`, inline: false },
         );
+
+    if (product && product.image) {
+        embed.setThumbnail(product.image);
+    }
 
     // Hiển thị hướng dẫn
     let statusNote = '';
@@ -185,8 +190,12 @@ async function handleShopInteraction(interaction) {
         const embed = new EmbedBuilder()
             .setColor(0x2ecc71)
             .setTitle(`🛒 Xác Nhận Mua Hàng`)
-            .setDescription(`Bạn đã chọn:\n**${product.label}**\n\nGiá: **${product.price.toLocaleString('vi-VN')} VND**\n\nMô tả: ${product.description}\n\nNhấn nút bên dưới để tạo kênh giao dịch.`)
+            .setDescription(`Bạn đã chọn:\n**${product.emoji || '📦'} ${product.label}**\n\nGiá: **${product.price.toLocaleString('vi-VN')} VND**\n\nMô tả: ${product.description}\n\nNhấn nút bên dưới để tạo kênh giao dịch.`)
             .setFooter({ text: 'Vui lòng không tạo ticket spam.' });
+
+        if (product.image) {
+            embed.setThumbnail(product.image);
+        }
 
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
