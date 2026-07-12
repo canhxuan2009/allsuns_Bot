@@ -6,7 +6,7 @@ module.exports = [
         emoji: '✨',
         image: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Google_Gemini_logo.svg/512px-Google_Gemini_logo.svg.png',
         variants: [
-            { id: 'gemini_advanced_1m', label: '1 Tháng', price: 50000, description: 'Gói cá nhân siêu tiết kiệm' },
+            { id: 'gemini_advanced_1m', label: '1 Tháng', price: 50000, description: ' Gói cá nhân siêu tiết kiệm' },
             { id: 'gemini_advanced_3m', label: '3 Tháng', price: 140000 }
         ]
     },

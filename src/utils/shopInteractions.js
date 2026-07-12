@@ -38,7 +38,7 @@ function buildShopEmbed(ticket, guild) {
         .addFields(
             { name: '👤 Người Mua', value: `<@${ticket.buyerId}>`, inline: true },
             { name: '🛡️ Nhân Viên Xử Lý', value: `<@${SHOP_ADMIN_ID}>`, inline: true },
-            { name: '📦 Sản Phẩm', value: `**${product && product.emoji ? product.emoji + ' ' : ''}${ticket.productName}**${variant && variant.description ? `\n*${variant.description}*` : ''}`, inline: false },
+            { name: '📦 Sản Phẩm', value: `**${product && product.emoji ? product.emoji + ' ' : ''}${ticket.productName}**${variant && variant.description ? `\n*${variant.description.trim()}*` : ''}`, inline: false },
             { name: '💰 Số Tiền Cần Thanh Toán', value: `**${ticket.price.toLocaleString('vi-VN')} ${ticket.currency}**`, inline: false },
         );
 
@@ -189,9 +189,9 @@ async function handleShopInteraction(interaction) {
         }
 
         const variantsList = product.variants.map(v => {
-            let text = `- **${v.label}**: ${v.price.toLocaleString('vi-VN')} VND`;
+            let text = `🔹 **${v.label}**: ${v.price.toLocaleString('vi-VN')} VND`;
             if (v.description) {
-                text += `\n  *${v.description}*`;
+                text += `\n*${v.description.trim()}*`;
             }
             return text;
         }).join('\n');
