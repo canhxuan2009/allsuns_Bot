@@ -29,7 +29,7 @@ const STATUS_LABELS = {
 
 function buildShopEmbed(ticket, guild) {
     const statusLabel = STATUS_LABELS[ticket.status] || ticket.status;
-    const product = shopProducts.find(p => p.id === ticket.productId);
+    const product = shopProducts.find(p => p.variants && p.variants.some(v => v.id === ticket.productId));
 
     const embed = new EmbedBuilder()
         .setColor(ticket.status === 'COMPLETED' ? 0x2ecc71 : ticket.status === 'CANCELLED' ? 0xe74c3c : 0xf1c40f)
@@ -187,32 +187,54 @@ async function handleShopInteraction(interaction) {
             return interaction.reply({ content: '❌ Không tìm thấy sản phẩm này.', ephemeral: true });
         }
 
+        const variantsList = product.variants.map(v => `- **${v.label}**: ${v.price.toLocaleString('vi-VN')} VND`).join('\n');
+
         const embed = new EmbedBuilder()
             .setColor(0x2ecc71)
             .setTitle(`🛒 Xác Nhận Mua Hàng`)
-            .setDescription(`Bạn đã chọn:\n**${product.emoji || '📦'} ${product.label}**\n\nGiá: **${product.price.toLocaleString('vi-VN')} VND**\n\nMô tả: ${product.description}\n\nNhấn nút bên dưới để tạo kênh giao dịch.`)
+            .setDescription(`Bạn đã chọn:\n**${product.emoji || '📦'} ${product.label}**\n\nCác gói sản phẩm:\n${variantsList}\n\nMô tả: ${product.description}\n\nNhấn nút bên dưới để tạo kênh giao dịch.`)
             .setFooter({ text: 'Vui lòng không tạo ticket spam.' });
 
         if (product.image) {
-            embed.setThumbnail(product.image);
+            embed.setImage(product.image);
         }
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`shop_create_ticket_${productId}`)
-                .setLabel('🎫 Tạo Ticket Mua Hàng')
-                .setStyle(ButtonStyle.Success)
-        );
+        const components = [];
+        let currentRow = new ActionRowBuilder();
+        for (let i = 0; i < product.variants.length; i++) {
+            const v = product.variants[i];
+            currentRow.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`shop_create_ticket_${v.id}`)
+                    .setLabel(`${v.label} — ${v.price.toLocaleString('vi-VN')}đ`)
+                    .setStyle(ButtonStyle.Primary)
+            );
+            if (currentRow.components.length === 5 || i === product.variants.length - 1) {
+                components.push(currentRow);
+                currentRow = new ActionRowBuilder();
+            }
+        }
 
-        return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+        return interaction.reply({ embeds: [embed], components, ephemeral: true });
     }
 
     // 2. Xử lý Nút Tạo Ticket
     if (interaction.isButton() && interaction.customId.startsWith('shop_create_ticket_')) {
-        const productId = interaction.customId.replace('shop_create_ticket_', '');
-        const product = shopProducts.find(p => p.id === productId);
+        const variantId = interaction.customId.replace('shop_create_ticket_', '');
+        
+        let product = null;
+        let variant = null;
 
-        if (!product) {
+        for (const p of shopProducts) {
+            const v = p.variants.find(v => v.id === variantId);
+            if (v) {
+                product = p;
+                variant = v;
+                break;
+            }
+        }
+
+        if (!product || !variant) {
             return interaction.update({ content: '❌ Sản phẩm không còn tồn tại.', embeds: [], components: [] });
         }
 
@@ -270,9 +292,9 @@ async function handleShopInteraction(interaction) {
                 channelId: ticketChannel.id,
                 ticketId,
                 buyerId: buyer.id,
-                productId: product.id,
-                productName: product.label,
-                price: product.price,
+                productId: variant.id,
+                productName: `${product.label} - ${variant.label}`,
+                price: variant.price,
                 status: 'WAITING_PAYMENT',
             });
 
@@ -281,12 +303,12 @@ async function handleShopInteraction(interaction) {
             const embed = buildShopEmbed(ticket, guild);
             const components = buildShopButtons(ticket);
 
-            const qrUrl = `https://img.vietqr.io/image/${process.env.ESCROW_BANK_ID}-${process.env.ESCROW_BANK_ACCOUNT}-compact.png?amount=${product.price}&addInfo=${ticketId}&accountName=${encodeURIComponent(process.env.ESCROW_BANK_NAME || '')}`;
+            const qrUrl = `https://img.vietqr.io/image/${process.env.ESCROW_BANK_ID}-${process.env.ESCROW_BANK_ACCOUNT}-compact.png?amount=${variant.price}&addInfo=${ticketId}&accountName=${encodeURIComponent(process.env.ESCROW_BANK_NAME || '')}`;
 
             const bankInfo = new EmbedBuilder()
                 .setColor(0x3498db)
                 .setTitle('💳 Thông Tin Thanh Toán')
-                .setDescription(`Vui lòng chuyển khoản số tiền **${product.price.toLocaleString('vi-VN')} VND**.\n\n` +
+                .setDescription(`Vui lòng chuyển khoản số tiền **${variant.price.toLocaleString('vi-VN')} VND**.\n\n` +
                     `🏦 **Ngân hàng:** ${process.env.ESCROW_BANK_ID || 'Chưa cập nhật'}\n` +
                     `🔢 **Số tài khoản:** \`${process.env.ESCROW_BANK_ACCOUNT || 'Chưa cập nhật'}\`\n` +
                     `👤 **Chủ tài khoản:** ${process.env.ESCROW_BANK_NAME || 'Chưa cập nhật'}\n` +
@@ -305,7 +327,7 @@ async function handleShopInteraction(interaction) {
                 content: `✅ Đã tạo ticket mua hàng thành công!\n👉 Vào <#${ticketChannel.id}> để tiếp tục.`,
             });
 
-            logger.info(`[Shop] Ticket #${ticketId} được tạo bởi ${buyer.user.tag}, Sản phẩm: ${product.label}`);
+            logger.info(`[Shop] Ticket #${ticketId} được tạo bởi ${buyer.user.tag}, Sản phẩm: ${product.label} - ${variant.label}`);
 
         } catch (err) {
             logger.error(`[Shop] Lỗi tạo ticket: ${err.message}`);

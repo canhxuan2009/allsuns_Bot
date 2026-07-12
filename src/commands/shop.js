@@ -22,12 +22,15 @@ module.exports = {
             .setImage('https://cdn.discordapp.com/attachments/1524083621512613918/1524084097637679205/image.png?ex=6a54642c&is=6a5312ac&hm=2bd5e8ac7a575a1c4a9db6de5676b23d51766f63f2535e55704a6324510b43f8&') // Bạn có thể thay đổi ảnh này nếu muốn
             .setFooter({ text: 'CanhXuan Premium' })
 
-        const options = shopProducts.map(product => ({
-            label: product.label,
-            description: `${product.price.toLocaleString('vi-VN')} VND - ${product.description.substring(0, 50)}...`,
-            value: product.id,
-            emoji: product.emoji || '📦'
-        }));
+        const options = shopProducts.map(product => {
+            const minPrice = Math.min(...product.variants.map(v => v.price));
+            return {
+                label: product.label,
+                description: `Từ ${minPrice.toLocaleString('vi-VN')} VND - ${product.description.substring(0, 50)}...`,
+                value: product.id,
+                emoji: product.emoji || '📦'
+            };
+        });
 
         const selectMenu = new StringSelectMenuBuilder()
             .setCustomId('shop_product_select')
