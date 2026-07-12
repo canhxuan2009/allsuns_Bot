@@ -30,6 +30,7 @@ const STATUS_LABELS = {
 function buildShopEmbed(ticket, guild) {
     const statusLabel = STATUS_LABELS[ticket.status] || ticket.status;
     const product = shopProducts.find(p => p.variants && p.variants.some(v => v.id === ticket.productId));
+    const variant = product ? product.variants.find(v => v.id === ticket.productId) : null;
 
     const embed = new EmbedBuilder()
         .setColor(ticket.status === 'COMPLETED' ? 0x2ecc71 : ticket.status === 'CANCELLED' ? 0xe74c3c : 0xf1c40f)
@@ -37,7 +38,7 @@ function buildShopEmbed(ticket, guild) {
         .addFields(
             { name: '👤 Người Mua', value: `<@${ticket.buyerId}>`, inline: true },
             { name: '🛡️ Nhân Viên Xử Lý', value: `<@${SHOP_ADMIN_ID}>`, inline: true },
-            { name: '📦 Sản Phẩm', value: `**${product && product.emoji ? product.emoji + ' ' : ''}${ticket.productName}**`, inline: false },
+            { name: '📦 Sản Phẩm', value: `**${product && product.emoji ? product.emoji + ' ' : ''}${ticket.productName}**${variant && variant.description ? `\n*${variant.description}*` : ''}`, inline: false },
             { name: '💰 Số Tiền Cần Thanh Toán', value: `**${ticket.price.toLocaleString('vi-VN')} ${ticket.currency}**`, inline: false },
         );
 
@@ -187,7 +188,13 @@ async function handleShopInteraction(interaction) {
             return interaction.reply({ content: '❌ Không tìm thấy sản phẩm này.', ephemeral: true });
         }
 
-        const variantsList = product.variants.map(v => `- **${v.label}**: ${v.price.toLocaleString('vi-VN')} VND`).join('\n');
+        const variantsList = product.variants.map(v => {
+            let text = `- **${v.label}**: ${v.price.toLocaleString('vi-VN')} VND`;
+            if (v.description) {
+                text += `\n  *${v.description}*`;
+            }
+            return text;
+        }).join('\n');
 
         const embed = new EmbedBuilder()
             .setColor(0x2ecc71)
