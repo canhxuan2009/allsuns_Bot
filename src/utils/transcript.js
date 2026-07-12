@@ -36,7 +36,7 @@ function formatMarkdown(text) {
 /**
  * Tạo file HTML Transcript và gửi vào các kênh log archive tương ứng
  */
-async function createAndSendTranscript(channel, ticket, logChannelId) {
+async function createAndSendTranscript(channel, ticket, logChannelId, isShop = false) {
     try {
         const client = channel.client;
         const logChannel = logChannelId ? await client.channels.fetch(logChannelId).catch(() => null) : null;
@@ -132,20 +132,19 @@ async function createAndSendTranscript(channel, ticket, logChannelId) {
 
         // 4. Tạo mã HTML Transcript
         const buyer = await client.users.fetch(ticket.buyerId).catch(() => null);
-        const seller = ticket.sellerId ? await client.users.fetch(ticket.sellerId).catch(() => null) : null;
-        const midman = ticket.midmanId ? await client.users.fetch(ticket.midmanId).catch(() => null) : null;
+        const seller = (!isShop && ticket.sellerId) ? await client.users.fetch(ticket.sellerId).catch(() => null) : null;
+        const midman = (!isShop && ticket.midmanId) ? await client.users.fetch(ticket.midmanId).catch(() => null) : null;
 
         const buyerTag = buyer ? `${buyer.tag}` : ticket.buyerId;
-        const sellerTag = seller ? `${seller.tag}` : ticket.sellerId || 'N/A';
-        const midmanTag = midman ? `${midman.tag}` : ticket.midmanId || 'N/A';
-
+        const sellerTag = seller ? `${seller.tag}` : (isShop ? 'Shop Admin' : (ticket.sellerId || 'N/A'));
+        const midmanTag = midman ? `${midman.tag}` : (isShop ? 'N/A' : (ticket.midmanId || 'N/A'));
         let htmlContent = `
 <!DOCTYPE html>
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lịch sử Giao dịch #${ticket.dealId}</title>
+    <title>Lịch sử ${isShop ? 'Mua Hàng' : 'Giao Dịch'} #${ticket.dealId}</title>
     <style>
         body {
             background-color: #313338;
@@ -283,7 +282,7 @@ async function createAndSendTranscript(channel, ticket, logChannelId) {
 <body>
 
     <div class="header">
-        <h1>🤝 Lịch sử Giao dịch Trung Gian — #${ticket.dealId}</h1>
+        <h1>${isShop ? '🛒 Lịch sử Mua Hàng' : '🤝 Lịch sử Giao Dịch Trung Gian'} — #${ticket.dealId}</h1>
         <div class="grid">
             <div class="grid-item">
                 <span>Trạng thái</span>
@@ -297,6 +296,7 @@ async function createAndSendTranscript(channel, ticket, logChannelId) {
                 <span>Người mua</span>
                 <strong>${buyerTag}</strong>
             </div>
+            ${isShop ? '' : `
             <div class="grid-item">
                 <span>Người bán</span>
                 <strong>${sellerTag}</strong>
@@ -304,7 +304,7 @@ async function createAndSendTranscript(channel, ticket, logChannelId) {
             <div class="grid-item">
                 <span>Midman</span>
                 <strong>${midmanTag}</strong>
-            </div>
+            </div>`}
             <div class="grid-item">
                 <span>Ngày tạo</span>
                 <strong>${new Date(ticket.createdAt).toLocaleString('vi-VN')}</strong>
@@ -382,7 +382,7 @@ async function createAndSendTranscript(channel, ticket, logChannelId) {
         if (htmlChannel) {
             try {
                 const sentHtmlMsg = await htmlChannel.send({
-                    content: `📂 **Transcript HTML cho Deal #${ticket.dealId}**`,
+                    content: `📂 **Transcript HTML cho ${isShop ? 'Đơn Mua Hàng' : 'Deal'} #${ticket.dealId}**`,
                     files: [fileAttachment]
                 });
                 htmlFileUrl = sentHtmlMsg.attachments.first()?.url;
@@ -395,17 +395,25 @@ async function createAndSendTranscript(channel, ticket, logChannelId) {
         if (summaryChannel) {
             const summaryEmbed = new EmbedBuilder()
                 .setColor(ticket.status === 'COMPLETED' ? 0x2ecc71 : 0xe74c3c)
-                .setTitle(`🤝 Sao lưu Giao Dịch #${ticket.dealId}`)
-                .setDescription(`**Chi tiết giao dịch đã kết thúc và được lưu trữ an toàn.**`)
+                .setTitle(`${isShop ? '🛒 Sao lưu Mua Hàng' : '🤝 Sao lưu Giao Dịch'} #${ticket.dealId}`)
+                .setDescription(`**Chi tiết ${isShop ? 'đơn mua hàng' : 'giao dịch'} đã kết thúc và được lưu trữ an toàn.**`)
                 .addFields(
                     { name: '👤 Người Mua', value: `<@${ticket.buyerId}>`, inline: true },
-                    { name: '👤 Người Bán', value: `<@${ticket.sellerId}>`, inline: true },
-                    { name: '🛡️ Midman', value: ticket.midmanId ? `<@${ticket.midmanId}>` : '_Không có_', inline: true },
-                    { name: '💰 Số tiền', value: `**${ticket.amount.toLocaleString('vi-VN')} ${ticket.currency}**`, inline: true },
-                    { name: '🧾 Phí', value: `${ticket.fee.toLocaleString('vi-VN')} ${ticket.currency} (${ticket.feePayer === 'BUYER' ? 'Mua trả' : 'Bán trả'})`, inline: true },
-                    { name: '📊 Trạng thái', value: `\`${ticket.status}\``, inline: true },
-                    { name: '📦 Mô tả', value: ticket.description || '_Không có_' }
+                    { name: isShop ? '🛡️ Admin' : '👤 Người Bán', value: isShop ? 'Shop Admin' : `<@${ticket.sellerId}>`, inline: true }
                 );
+
+            if (!isShop) {
+                summaryEmbed.addFields(
+                    { name: '🛡️ Midman', value: ticket.midmanId ? `<@${ticket.midmanId}>` : '_Không có_', inline: true }
+                );
+            }
+
+            summaryEmbed.addFields(
+                { name: '💰 Số tiền', value: `**${ticket.amount.toLocaleString('vi-VN')} ${ticket.currency}**`, inline: true },
+                { name: '🧾 Phí', value: isShop ? '0 VND' : `${ticket.fee.toLocaleString('vi-VN')} ${ticket.currency} (${ticket.feePayer === 'BUYER' ? 'Mua trả' : 'Bán trả'})`, inline: true },
+                { name: '📊 Trạng thái', value: `\`${ticket.status}\``, inline: true },
+                { name: isShop ? '📦 Sản phẩm' : '📦 Mô tả', value: ticket.description || '_Không có_' }
+            );
 
             if (htmlFileUrl) {
                 summaryEmbed.addFields({ name: '📄 Lịch sử Chat', value: `[📥 Bấm vào đây để tải/xem Transcript HTML](${htmlFileUrl})` });
@@ -422,24 +430,32 @@ async function createAndSendTranscript(channel, ticket, logChannelId) {
         // 7. Gửi Direct Message (DM) cho Người Mua và Người Bán
         const dmEmbed = new EmbedBuilder()
             .setColor(ticket.status === 'COMPLETED' ? 0x2ecc71 : 0xe74c3c)
-            .setTitle(`🤝 Bản Sao Giao Dịch #${ticket.dealId}`)
-            .setDescription(`**Giao dịch của bạn đã kết thúc. Dưới đây là tóm tắt và file lịch sử chat (Transcript) đính kèm.**`)
+            .setTitle(`${isShop ? '🛒 Bản Sao Mua Hàng' : '🤝 Bản Sao Giao Dịch'} #${ticket.dealId}`)
+            .setDescription(`**${isShop ? 'Đơn mua hàng' : 'Giao dịch'} của bạn đã kết thúc. Dưới đây là tóm tắt và file lịch sử chat (Transcript) đính kèm.**`)
             .addFields(
                 { name: '👤 Người Mua', value: `<@${ticket.buyerId}>`, inline: true },
-                { name: '👤 Người Bán', value: `<@${ticket.sellerId}>`, inline: true },
-                { name: '🛡️ Midman', value: ticket.midmanId ? `<@${ticket.midmanId}>` : '_Không có_', inline: true },
-                { name: '💰 Số tiền', value: `**${ticket.amount.toLocaleString('vi-VN')} ${ticket.currency}**`, inline: true },
-                { name: '🧾 Phí', value: `${ticket.fee.toLocaleString('vi-VN')} ${ticket.currency} (${ticket.feePayer === 'BUYER' ? 'Mua trả' : 'Bán trả'})`, inline: true },
-                { name: '📊 Trạng thái', value: `\`${ticket.status}\``, inline: true },
-                { name: '📦 Mô tả', value: ticket.description || '_Không có_' }
-            )
-            .setTimestamp();
+                { name: isShop ? '🛡️ Admin' : '👤 Người Bán', value: isShop ? 'Shop Admin' : `<@${ticket.sellerId}>`, inline: true }
+            );
+
+        if (!isShop) {
+            dmEmbed.addFields(
+                { name: '🛡️ Midman', value: ticket.midmanId ? `<@${ticket.midmanId}>` : '_Không có_', inline: true }
+            );
+        }
+
+        dmEmbed.addFields(
+            { name: '💰 Số tiền', value: `**${ticket.amount.toLocaleString('vi-VN')} ${ticket.currency}**`, inline: true },
+            { name: '🧾 Phí', value: isShop ? '0 VND' : `${ticket.fee.toLocaleString('vi-VN')} ${ticket.currency} (${ticket.feePayer === 'BUYER' ? 'Mua trả' : 'Bán trả'})`, inline: true },
+            { name: '📊 Trạng thái', value: `\`${ticket.status}\``, inline: true },
+            { name: isShop ? '📦 Sản phẩm' : '📦 Mô tả', value: ticket.description || '_Không có_' }
+        )
+        .setTimestamp();
 
         if (buyer) {
             try {
                 const dmFileAttachmentBuyer = new AttachmentBuilder(buffer, { name: `transcript-${ticket.dealId}.html` });
                 await buyer.send({
-                    content: `🔔 **Thông báo giao dịch trung gian:** Giao dịch #${ticket.dealId} đã kết thúc.`,
+                    content: `🔔 **Thông báo từ hệ thống:** ${isShop ? 'Đơn mua hàng' : 'Giao dịch'} #${ticket.dealId} đã kết thúc.`,
                     embeds: [dmEmbed],
                     files: [dmFileAttachmentBuyer]
                 });
@@ -449,7 +465,7 @@ async function createAndSendTranscript(channel, ticket, logChannelId) {
             }
         }
 
-        if (seller) {
+        if (seller && !isShop) {
             try {
                 const dmFileAttachmentSeller = new AttachmentBuilder(buffer, { name: `transcript-${ticket.dealId}.html` });
                 await seller.send({
