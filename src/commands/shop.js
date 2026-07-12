@@ -17,18 +17,17 @@ module.exports = {
         }
 
         const embed = new EmbedBuilder()
-            .setColor(0x3498db)
-            .setTitle('🛒 Shop Tài Khoản Premium')
-            .setDescription('Chào mừng bạn đến với Shop! Vui lòng chọn sản phẩm bạn muốn mua từ menu bên dưới.\n\nSau khi chọn, hệ thống sẽ hướng dẫn bạn tạo ticket thanh toán và nhận hàng.')
+            .setColor(0x9de5ed)
+            .setDescription('# <a:VerifedTick:1525861266000711700> CanhXuan Premium\n **<a:favorite:1525860134402916452>Rất nhiều lựa chọn cho bạn tại đây**')
             .setImage('https://cdn.discordapp.com/attachments/1524083621512613918/1524084097637679205/image.png?ex=6a54642c&is=6a5312ac&hm=2bd5e8ac7a575a1c4a9db6de5676b23d51766f63f2535e55704a6324510b43f8&') // Bạn có thể thay đổi ảnh này nếu muốn
-            .setFooter({ text: 'AllSuns Shop System' })
+            .setFooter({ text: 'CanhXuan Premium' })
             .setTimestamp();
 
         const options = shopProducts.map(product => ({
             label: product.label,
             description: `${product.price.toLocaleString('vi-VN')} VND - ${product.description.substring(0, 50)}...`,
             value: product.id,
-            emoji: product.emoji || '📦'
+            emoji: '📦'
         }));
 
         const selectMenu = new StringSelectMenuBuilder()
