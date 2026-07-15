@@ -593,6 +593,7 @@ async function handleConfirmSeller(interaction) {
         if (midmanRoleId) {
             channelOptions.permissionOverwrites.push({
                 id: midmanRoleId,
+                type: 0, // Role
                 allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages],
             });
         }

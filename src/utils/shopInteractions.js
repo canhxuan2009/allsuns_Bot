@@ -275,18 +275,22 @@ async function handleShopInteraction(interaction) {
                 permissionOverwrites: [
                     {
                         id: guild.id,
+                        type: 0, // Role
                         deny: [PermissionFlagsBits.ViewChannel],
                     },
                     {
                         id: buyer.id,
+                        type: 1, // Member
                         allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory],
                     },
                     {
                         id: SHOP_ADMIN_ID,
+                        type: 1, // Member
                         allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ReadMessageHistory],
                     },
                     {
                         id: interaction.client.user.id,
+                        type: 1, // Member
                         allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ReadMessageHistory],
                     },
                 ],
