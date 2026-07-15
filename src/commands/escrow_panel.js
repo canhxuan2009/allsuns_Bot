@@ -41,14 +41,13 @@ module.exports = {
                 '**Bạn muốn giao dịch an toàn?**\n\n' +
                 'Dịch vụ Trung Gian giúp bảo vệ quyền lợi của cả Người Mua và Người Bán.\n' +
                 'Midman sẽ giữ tiền cho đến khi hàng hoá được giao đầy đủ.\n\n' +
-                '**<a:bell:1524418557658665082> Quy trình:**\n' +
+                '**<a:pepenoted:1526499891256496220> Quy trình:**\n' +
                 '> 1️⃣ Bấm nút bên dưới để tạo Ticket\n' +
                 '> 2️⃣ Điền thông tin giao dịch (ID Người Bán, số tiền, loại tiền)\n' +
                 '> 3️⃣ Chuyển tiền cho Midman\n' +
                 '> 4️⃣ Người Bán giao hàng\n' +
                 '> 5️⃣ Xác nhận & Midman giải ngân\n\n' +
                 '<a:money:1524418616538435634> **Hỗ trợ:** VND & DonutSMP Money\n' +
-                '🛡️ **Miễn phí**\n\n' +
                 '⬇️ Bấm nút bên dưới để bắt đầu!'
             )
             .setFooter({ text: `${interaction.guild.name} • Dịch vụ Trung Gian` })
