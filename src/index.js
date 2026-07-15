@@ -2,7 +2,7 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
-const { Client, Collection, GatewayIntentBits, Events } = require('discord.js');
+const { Client, Collection, GatewayIntentBits, Events, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const logger = require('./utils/logger');
 const { init: initAutoRename, scheduleRename } = require('./utils/autoRename');
 const { getTracked } = require('./utils/tracker');
@@ -103,6 +103,46 @@ client.on(Events.InteractionCreate, async (interaction) => {
 // Xử lý Button, Modal & SelectMenu interactions (Escrow & Shop Ticket System)
 client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isButton() && !interaction.isModalSubmit() && !interaction.isStringSelectMenu()) return;
+
+    // ── Xử lý nút xác minh con người ────────────────────────────────
+    if (interaction.isButton() && (interaction.customId === 'verify_human' || interaction.customId === 'verify_dog')) {
+        try {
+            const member = interaction.member;
+            if (!member) return;
+
+            const restrictedRoleId = process.env.MODERATION_RESTRICTED_ROLE_ID;
+            if (!restrictedRoleId) {
+                await interaction.reply({ content: '❌ Chưa cấu hình role giới hạn.', ephemeral: true });
+                return;
+            }
+
+            // Kiểm tra user có đang bị giới hạn hay không
+            if (!member.roles.cache.has(restrictedRoleId)) {
+                await interaction.reply({ content: '✅ Bạn không bị giới hạn, không cần xác minh.', ephemeral: true });
+                return;
+            }
+
+            // Gỡ role giới hạn → khôi phục quyền truy cập bình thường
+            await member.roles.remove(restrictedRoleId, '[AutoMod] Đã xác minh con người');
+            logger.info(`[ImageMod] ✅ Đã gỡ role giới hạn cho ${interaction.user.tag} sau khi xác minh.`);
+
+            await interaction.reply({
+                content: '✅ Xác minh thành công! Quyền truy cập của bạn đã được khôi phục.',
+                ephemeral: true
+            });
+
+            // Xoá tin nhắn panel xác minh sau khi hoàn tất
+            try {
+                await interaction.message.delete();
+            } catch { /* ignore */ }
+        } catch (error) {
+            logger.error(`[ImageMod] Lỗi xử lý xác minh: ${error.message}`);
+            try {
+                await interaction.reply({ content: '❌ Đã xảy ra lỗi khi xác minh. Vui lòng liên hệ Admin.', ephemeral: true });
+            } catch { /* ignore */ }
+        }
+        return;
+    }
 
     try {
         let handled = await handleEscrowInteraction(interaction);
@@ -284,15 +324,12 @@ client.on(Events.MessageCreate, async (message) => {
 // ─── Kiểm duyệt hình ảnh tự động bằng AI (Gemini Vision) ──────────────
 const MODERATION_MEMBER_ROLE_ID = process.env.MODERATION_MEMBER_ROLE_ID;
 const MODERATION_OWNER_ID = process.env.MODERATION_OWNER_ID;
-const MODERATION_MUTE_MINUTES = parseInt(process.env.MODERATION_MUTE_MINUTES) || 60;
+const MODERATION_RESTRICTED_ROLE_ID = process.env.MODERATION_RESTRICTED_ROLE_ID;
+const MODERATION_VERIFY_CHANNEL_ID = process.env.MODERATION_VERIFY_CHANNEL_ID;
 const { analyzeImage } = require('./utils/imageModeration');
 
 // Danh sách các MIME type ảnh được hỗ trợ
 const IMAGE_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-
-// Danh sách user đã bị phát hiện scam — tự động xoá tin nhắn tiếp theo mà không cần gọi API
-// Lưu theo guildId:userId để tránh xung đột giữa các server
-const flaggedScamUsers = new Set();
 
 // Map lưu thời gian quét ảnh gần nhất của mỗi user để làm cooldown (10 phút)
 const imageModerationCooldowns = new Map();
@@ -306,16 +343,9 @@ client.on(Events.MessageCreate, async (message) => {
     const member = message.member;
     if (!member || !member.roles.cache.has(MODERATION_MEMBER_ROLE_ID)) return;
 
-    // ── Kiểm tra user đã bị gắn cờ scam ─────────────────────────────
-    // Nếu user đã bị phát hiện scam trước đó → xoá tin nhắn ngay, không cần gọi API
-    const flagKey = `${message.guild.id}:${message.author.id}`;
-    if (flaggedScamUsers.has(flagKey)) {
-        try {
-            await message.delete();
-            logger.info(`[ImageMod] 🗑️ Đã xoá tin nhắn của user bị gắn cờ scam: ${message.author.tag}`);
-        } catch (err) {
-            logger.error(`[ImageMod] Không thể xoá tin nhắn của user gắn cờ: ${err.message}`);
-        }
+    // ── Kiểm tra user đã bị giới hạn (có role restricted) ────────────
+    // Nếu user đang bị giới hạn → bỏ qua, không cần quét lại
+    if (MODERATION_RESTRICTED_ROLE_ID && member.roles.cache.has(MODERATION_RESTRICTED_ROLE_ID)) {
         return;
     }
 
@@ -355,13 +385,6 @@ client.on(Events.MessageCreate, async (message) => {
             if (result.category === 'SCAM') {
                 logger.warn(`[ImageMod] 🚨 SCAM detected! User: ${message.author.tag} | Reason: ${result.reason}`);
 
-                // Gắn cờ user → mọi tin nhắn tiếp theo sẽ bị xoá tự động trong vòng 1 phút
-                flaggedScamUsers.add(flagKey);
-                setTimeout(() => {
-                    flaggedScamUsers.delete(flagKey);
-                    logger.info(`[ImageMod] 🔓 Đã gỡ bỏ cờ scam cho user: ${message.author.tag}`);
-                }, 60_000);
-
                 // 1. Xoá tin nhắn
                 try {
                     await message.delete();
@@ -369,38 +392,66 @@ client.on(Events.MessageCreate, async (message) => {
                     logger.error(`[ImageMod] Không thể xoá tin nhắn: ${delErr.message}`);
                 }
 
-                // 2. Mute (timeout) người gửi
-                try {
-                    const muteDuration = MODERATION_MUTE_MINUTES * 60 * 1000; // Chuyển sang milliseconds
-                    await member.timeout(muteDuration, `[AutoMod] Phát hiện ảnh lừa đảo: ${result.reason}`);
-                    logger.info(`[ImageMod] ✅ Đã mute ${message.author.tag} trong ${MODERATION_MUTE_MINUTES} phút.`);
-                } catch (muteErr) {
-                    logger.error(`[ImageMod] Không thể mute ${message.author.tag}: ${muteErr.message}`);
+                // 2. Thêm role giới hạn → user chỉ thấy kênh xác minh
+                if (MODERATION_RESTRICTED_ROLE_ID) {
+                    try {
+                        await member.roles.add(MODERATION_RESTRICTED_ROLE_ID, `[AutoMod] Phát hiện ảnh lừa đảo: ${result.reason}`);
+                        logger.info(`[ImageMod] 🔒 Đã thêm role giới hạn cho ${message.author.tag}.`);
+                    } catch (roleErr) {
+                        logger.error(`[ImageMod] Không thể thêm role giới hạn cho ${message.author.tag}: ${roleErr.message}`);
+                    }
                 }
 
-                // 3. Gửi cảnh báo trong kênh
-                try {
-                    const warning = await message.channel.send(
-                        `🚨 ${message.author} đã bị phát hiện gửi **nội dung lừa đảo** và đã bị mute.\n` +
-                        `Nếu có sai sót, vui lòng nhắn tin trực tiếp (DM) cho Admin để được hỗ trợ. 📩`
-                    );
-                    // Tự xoá cảnh báo sau 15 giây
-                    setTimeout(() => warning.delete().catch(() => {}), 15_000);
-                } catch (warnErr) {
-                    logger.error(`[ImageMod] Không thể gửi cảnh báo trong kênh: ${warnErr.message}`);
+                // 3. Gửi panel xác minh con người vào kênh xác minh
+                if (MODERATION_VERIFY_CHANNEL_ID) {
+                    try {
+                        const verifyChannel = await message.guild.channels.fetch(MODERATION_VERIFY_CHANNEL_ID);
+                        if (verifyChannel) {
+                            const verifyEmbed = new EmbedBuilder()
+                                .setColor(0xFF6B6B)
+                                .setTitle('🔒 Xác Minh Con Người')
+                                .setDescription(
+                                    `${message.author}, tài khoản của bạn đã bị tạm thời giới hạn do hệ thống phát hiện nội dung vi phạm.\n\n` +
+                                    `Để khôi phục quyền truy cập, vui lòng nhấn **một trong hai nút** bên dưới để xác minh.`
+                                )
+                                .setFooter({ text: 'Hệ thống kiểm duyệt tự động' })
+                                .setTimestamp();
+
+                            const verifyRow = new ActionRowBuilder().addComponents(
+                                new ButtonBuilder()
+                                    .setCustomId('verify_human')
+                                    .setLabel('Người')
+                                    .setEmoji('🧑')
+                                    .setStyle(ButtonStyle.Success),
+                                new ButtonBuilder()
+                                    .setCustomId('verify_dog')
+                                    .setLabel('Chó')
+                                    .setEmoji('🐕')
+                                    .setStyle(ButtonStyle.Secondary),
+                            );
+
+                            await verifyChannel.send({
+                                content: `${message.author}`,
+                                embeds: [verifyEmbed],
+                                components: [verifyRow]
+                            });
+                            logger.info(`[ImageMod] 📋 Đã gửi panel xác minh cho ${message.author.tag} tại kênh xác minh.`);
+                        }
+                    } catch (verifyErr) {
+                        logger.error(`[ImageMod] Không thể gửi panel xác minh: ${verifyErr.message}`);
+                    }
                 }
 
-                // Nội dung thông báo chi tiết (dùng chung cho cả owner và người vi phạm)
+                // 4. DM cho chủ bot kèm ảnh vi phạm
                 const violationInfo =
                     `🚨 **Phát hiện ảnh lừa đảo (SCAM)**\n\n` +
                     `👤 **Người gửi:** ${message.author.tag} (${message.author.id})\n` +
                     `📍 **Kênh:** #${message.channel.name} (${message.channel.id})\n` +
                     `🏠 **Server:** ${message.guild.name}\n` +
                     `📝 **Lý do:** ${result.reason}\n` +
-                    `⏱️ **Đã mute:** ${MODERATION_MUTE_MINUTES} phút\n` +
+                    `🔒 **Hành động:** Đã giới hạn quyền truy cập — chờ xác minh con người\n` +
                     `🕐 **Thời gian:** ${new Date().toLocaleString('vi-VN')}`;
 
-                // 4. DM cho chủ bot kèm ảnh vi phạm
                 if (MODERATION_OWNER_ID) {
                     try {
                         const owner = await message.client.users.fetch(MODERATION_OWNER_ID);
@@ -412,19 +463,6 @@ client.on(Events.MessageCreate, async (message) => {
                     } catch (dmErr) {
                         logger.error(`[ImageMod] Không thể gửi DM cho owner: ${dmErr.message}`);
                     }
-                }
-
-                // 5. DM cho người vi phạm kèm ảnh
-                try {
-                    await message.author.send({
-                        content:
-                            violationInfo + `\n\n` +
-                            `📩 Nếu bạn cho rằng đây là nhầm lẫn, vui lòng nhắn tin trực tiếp cho Admin của server để được hỗ trợ giải quyết.`,
-                        files: [{ attachment: attachment.url, name: attachment.name || 'scam_image.png' }]
-                    });
-                    logger.info(`[ImageMod] ✅ Đã gửi DM thông báo cho người vi phạm: ${message.author.tag}`);
-                } catch (dmErr) {
-                    logger.error(`[ImageMod] Không thể gửi DM cho người vi phạm (có thể đã tắt DM): ${dmErr.message}`);
                 }
 
                 break; // Đã xoá tin nhắn, không cần kiểm tra các ảnh còn lại

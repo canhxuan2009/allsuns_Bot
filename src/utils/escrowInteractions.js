@@ -42,14 +42,14 @@ function isMidman(member, guildId) {
  * Nhãn trạng thái cho embed
  */
 const STATUS_LABELS = {
-    SETUP:            '🔧 Đang thiết lập',
-    WAITING_FUNDS:    '⏳ Chờ chuyển tiền',
+    SETUP: '🔧 Đang thiết lập',
+    WAITING_FUNDS: '⏳ Chờ chuyển tiền',
     WAITING_DELIVERY: '📦 Chờ giao hàng',
-    BUYER_CHECK:      '🔍 Người mua kiểm tra',
-    HOLDING:          '🔒 Đang giữ tiền (Hold)',
-    READY_PAYOUT:     '💸 Đã giải ngân',
-    COMPLETED:        '✅ Hoàn tất',
-    CANCELLED:        '❌ Đã huỷ',
+    BUYER_CHECK: '🔍 Người mua kiểm tra',
+    HOLDING: '🔒 Đang giữ tiền (Hold)',
+    READY_PAYOUT: '💸 Đã giải ngân',
+    COMPLETED: '✅ Hoàn tất',
+    CANCELLED: '❌ Đã huỷ',
 };
 
 // ─── Tạo Embed Thông Tin Deal ───────────────────────────────────────────
@@ -128,11 +128,13 @@ function buildActionButtons(ticket) {
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('escrow_funds_received')
-                    .setLabel('✅ Midman: Đã Nhận Tiền')
+                    .setEmoji('<a:yes:1526492492374081596>')
+                    .setLabel('Midman: Đã Nhận Tiền')
                     .setStyle(ButtonStyle.Success),
                 new ButtonBuilder()
                     .setCustomId('escrow_cancel')
-                    .setLabel('❌ Huỷ Giao Dịch')
+                    .setEmoji('<a:no:1526492874668113980>')
+                    .setLabel('Huỷ Giao Dịch')
                     .setStyle(ButtonStyle.Danger),
             );
             rows.push(row);
@@ -146,7 +148,8 @@ function buildActionButtons(ticket) {
                     .setStyle(ButtonStyle.Primary),
                 new ButtonBuilder()
                     .setCustomId('escrow_cancel')
-                    .setLabel('❌ Huỷ Giao Dịch')
+                    .setEmoji('<a:no:1526492874668113980>')
+                    .setLabel('Huỷ Giao Dịch')
                     .setStyle(ButtonStyle.Danger),
             );
             rows.push(row);
@@ -156,7 +159,8 @@ function buildActionButtons(ticket) {
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('escrow_buyer_approve')
-                    .setLabel('✅ Hàng Chuẩn — Thanh Toán')
+                    .setEmoji('<a:yes:1526492492374081596>')
+                    .setLabel('Hàng Chuẩn — Thanh Toán')
                     .setStyle(ButtonStyle.Success),
                 new ButtonBuilder()
                     .setCustomId('escrow_buyer_hold')
@@ -164,7 +168,8 @@ function buildActionButtons(ticket) {
                     .setStyle(ButtonStyle.Secondary),
                 new ButtonBuilder()
                     .setCustomId('escrow_cancel')
-                    .setLabel('❌ Huỷ')
+                    .setEmoji('<a:no:1526492874668113980>')
+                    .setLabel('Huỷ')
                     .setStyle(ButtonStyle.Danger),
             );
             rows.push(row);
@@ -178,7 +183,8 @@ function buildActionButtons(ticket) {
                     .setStyle(ButtonStyle.Success),
                 new ButtonBuilder()
                     .setCustomId('escrow_cancel')
-                    .setLabel('❌ Huỷ & Hoàn Tiền')
+                    .setEmoji('<a:no:1526492874668113980>')
+                    .setLabel('Huỷ & Hoàn Tiền')
                     .setStyle(ButtonStyle.Danger),
             );
             rows.push(row);
@@ -192,7 +198,8 @@ function buildActionButtons(ticket) {
                     .setStyle(ButtonStyle.Success),
                 new ButtonBuilder()
                     .setCustomId('escrow_cancel')
-                    .setLabel('❌ Huỷ')
+                    .setEmoji('<a:no:1526492874668113980>')
+                    .setLabel('Huỷ')
                     .setStyle(ButtonStyle.Danger),
             );
             rows.push(row);
@@ -203,7 +210,8 @@ function buildActionButtons(ticket) {
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('escrow_close_ticket')
-                    .setLabel('🗑️ Midman: Đóng Kênh')
+                    .setEmoji('<:Deleted:1526857919457656892>')
+                    .setLabel('Midman: Đóng Kênh')
                     .setStyle(ButtonStyle.Danger),
             );
             rows.push(row);
@@ -228,11 +236,11 @@ async function updateTicketChannelName(channel, ticket) {
             CANCELLED: '🔴',
         };
         const emoji = STATUS_EMOJIS[ticket.status];
-        
+
         // Tách bỏ các emoji/ký tự đặc biệt ở đầu để lấy tên gốc
         const cleanName = channel.name.replace(/^[^a-zA-Z0-9]+/, '');
         const newName = emoji ? `${emoji}-${cleanName}` : cleanName;
-        
+
         if (channel.name !== newName) {
             await channel.setName(newName);
             logger.info(`[Escrow] Đổi tên kênh #${ticket.dealId} thành: ${newName}`);
@@ -423,7 +431,7 @@ async function handleConfigureSubmit(interaction) {
                 return interaction.editReply({ content: `❌ Không tìm thấy thành viên nào có tên "**${sellerInputRaw}**" trong server.` });
             }
             sellerMember = searchResults.find(m => m.user.username.toLowerCase() === sellerInputRaw.toLowerCase())
-                        || searchResults.first();
+                || searchResults.first();
         } catch {
             return interaction.editReply({ content: '❌ Lỗi khi tìm kiếm thành viên. Vui lòng thử lại.' });
         }
@@ -500,11 +508,13 @@ async function handleConfigureSubmit(interaction) {
     const confirmRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId('escrow_confirm_seller')
-            .setLabel('✅ Xác Nhận - Đúng Người')
+            .setEmoji('<a:yes:1526492492374081596>')
+            .setLabel('Xác Nhận - Đúng Người')
             .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
             .setCustomId('escrow_reconfigure_seller')
-            .setLabel('❌ Nhập Lại')
+            .setEmoji('<a:no:1526492874668113980>')
+            .setLabel('Nhập Lại')
             .setStyle(ButtonStyle.Danger),
     );
 

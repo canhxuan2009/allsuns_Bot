@@ -21,10 +21,10 @@ function generateTicketId() {
 
 const STATUS_LABELS = {
     WAITING_PAYMENT: '⏳ Chờ chuyển khoản',
-    PAID:            '💵 Đã chuyển khoản (Chờ kiểm tra)',
-    DELIVERED:       '📦 Đã giao hàng',
-    COMPLETED:       '✅ Hoàn tất',
-    CANCELLED:       '❌ Đã huỷ',
+    PAID: '💵 Đã chuyển khoản (Chờ kiểm tra)',
+    DELIVERED: '📦 Đã giao hàng',
+    COMPLETED: '✅ Hoàn tất',
+    CANCELLED: '❌ Đã huỷ',
 };
 
 function buildShopEmbed(ticket, guild) {
@@ -81,11 +81,13 @@ function buildShopButtons(ticket) {
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('shop_payment_done')
-                    .setLabel('✅ Đã chuyển khoản')
+                    .setEmoji('<a:yes:1526492492374081596>')
+                    .setLabel('Đã chuyển khoản')
                     .setStyle(ButtonStyle.Success),
                 new ButtonBuilder()
                     .setCustomId('shop_cancel')
-                    .setLabel('❌ Huỷ đơn')
+                    .setEmoji('<a:no:1526492874668113980>')
+                    .setLabel('Huỷ đơn')
                     .setStyle(ButtonStyle.Danger),
             );
             rows.push(row);
@@ -99,7 +101,8 @@ function buildShopButtons(ticket) {
                     .setStyle(ButtonStyle.Primary),
                 new ButtonBuilder()
                     .setCustomId('shop_cancel')
-                    .setLabel('❌ Huỷ đơn (Admin)')
+                    .setEmoji('<a:no:1526492874668113980>')
+                    .setLabel('Huỷ đơn (Admin)')
                     .setStyle(ButtonStyle.Danger),
             );
             rows.push(row);
@@ -120,7 +123,8 @@ function buildShopButtons(ticket) {
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId('shop_close')
-                    .setLabel('🗑️ Đóng Kênh')
+                    .setEmoji('<:Deleted:1526857919457656892>')
+                    .setLabel('Đóng Kênh')
                     .setStyle(ButtonStyle.Danger),
             );
             rows.push(row);
@@ -141,10 +145,10 @@ async function updateShopChannelName(channel, ticket) {
             CANCELLED: '🔴',
         };
         const emoji = STATUS_EMOJIS[ticket.status];
-        
+
         const cleanName = channel.name.replace(/^[^a-zA-Z0-9]+/, '');
         const newName = emoji ? `${emoji}-${cleanName}` : cleanName;
-        
+
         if (channel.name !== newName) {
             await channel.setName(newName);
             logger.info(`[Shop] Đổi tên kênh #${ticket.ticketId} thành: ${newName}`);
@@ -228,7 +232,7 @@ async function handleShopInteraction(interaction) {
     // 2. Xử lý Nút Tạo Ticket
     if (interaction.isButton() && interaction.customId.startsWith('shop_create_ticket_')) {
         const variantId = interaction.customId.replace('shop_create_ticket_', '');
-        
+
         let product = null;
         let variant = null;
 
@@ -402,7 +406,7 @@ async function handleShopInteraction(interaction) {
             }
             case 'shop_cancel': {
                 if (!isAdmin && !isBuyer) return interaction.reply({ content: '❌ Bạn không có quyền thao tác.', ephemeral: true });
-                
+
                 await interaction.deferUpdate();
                 ticket.status = 'CANCELLED';
                 await ticket.save();
@@ -413,9 +417,9 @@ async function handleShopInteraction(interaction) {
             }
             case 'shop_close': {
                 if (!isAdmin) return interaction.reply({ content: '❌ Chỉ Admin mới có quyền đóng kênh.', ephemeral: true });
-                
+
                 await interaction.deferUpdate();
-                
+
                 // Gọi hàm lưu transcript. Do ShopTicket có cấu trúc hơi khác EscrowTicket (ticketId vs dealId, productName thay vì description)
                 // Cần truyền flag isShop = true cho hàm xử lý transcript (sẽ sửa trong transcript.js)
                 const logChannelId = process.env.ESCROW_LOG_CHANNEL_ID;
@@ -426,9 +430,9 @@ async function handleShopInteraction(interaction) {
                 ticket.description = ticket.productName;
 
                 await createAndSendTranscript(interaction.channel, ticket, logChannelId, true); // true = isShop
-                
+
                 setTimeout(() => {
-                    interaction.channel.delete().catch(() => {});
+                    interaction.channel.delete().catch(() => { });
                 }, 5000);
                 break;
             }
