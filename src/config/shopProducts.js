@@ -73,4 +73,16 @@ module.exports = [
             { id: 'gamepass-ultimate', label: 'Gamepass Ultimate 1 tháng', price: 600000, description: 'Gồm cả PC Game Pass, Game Pass trên Console, EA Play và Cloud Gaming' }
         ]
     },
+    {
+        id: 'rankDonut',
+        label: 'Up rank DonutSMP',
+        description: 'Nâng cấp rank cho server DonutSMP, nhận nhiều đặc quyền trên server',
+        emoji: '<:DonutSMP:962837202440708196>',
+        image: 'https://cdn.discordapp.com/attachments/1524083621512613918/1528055194200576180/image.png?ex=6a5ce7cc&is=6a5b964c&hm=b47833445bdadd8d9b1370ef9f9b66c4e1e953e5c87025309534805a0ad11736',
+        variants: [
+            { id: 'plus', label: 'Donut +', price: 160000, description: '9 homes, 27 slot ord/ah' },
+            { id: 'plus_plus', label: 'Donut ++', price: 290000, description: '27 homes, 90 slot order/ah' },
+            { id: 'plus_plus_plus', label: 'Donut +++', price: 425000, description: '90 homes, 90 slot order/ah' }
+        ],
+    },
 ];
