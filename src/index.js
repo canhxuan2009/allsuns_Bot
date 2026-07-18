@@ -9,6 +9,7 @@ const { getTracked } = require('./utils/tracker');
 const { translateToVietnamese } = require('./utils/translator');
 const { handleEscrowInteraction } = require('./utils/escrowInteractions');
 const { handleShopInteraction } = require('./utils/shopInteractions');
+const { handleTicketInteraction } = require('./utils/ticketInteractions');
 
 // ─── Cấu hình dịch tự động DonutSMP ────────────────────────────────────
 // Channel nguồn: nơi chứa thông báo tiếng Anh từ DonutSMP
@@ -150,6 +151,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
         
         handled = await handleShopInteraction(interaction);
         if (handled) return;
+
+        await handleTicketInteraction(interaction);
     } catch (error) {
         logger.error(`[Escrow] Lỗi xử lý interaction: ${error.message}`);
         const reply = { content: '❌ Đã xảy ra lỗi khi xử lý yêu cầu.', ephemeral: true };
