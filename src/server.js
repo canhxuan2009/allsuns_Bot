@@ -1,8 +1,9 @@
+require('dotenv').config();
 const express = require('express');
 const logger = require('./utils/logger');
 
 const app = express();
-const PORT = process.env.AUTH_SERVER_PORT || process.env.PORT || 3000;
+const PORT = process.env.AUTH_SERVER_PORT || 2030;
 
 app.use(express.json());
 
@@ -45,7 +46,7 @@ function startServer(port = PORT) {
     return app.listen(port, () => {
         logger.info(`=================================`);
         logger.info(`🚀 Auth API Server is running!`);
-        logger.info(`📍 Endpoint: http://localhost:${port}/api/auth`);
+        logger.info(`📍 Endpoint: http://0.0.0.0:${port}/api/auth`);
         logger.info(`=================================`);
     });
 }

@@ -609,8 +609,9 @@ client.on(Events.MessageCreate, async (message) => {
 
 // ─── Kết nối MongoDB rồi đăng nhập Discord ─────────────────────────────
 async function start() {
-    // Khởi tạo Auth API Server
+    // Khởi tạo Auth API Server (port 2030)
     startAuthServer();
+
 
     try {
         await mongoose.connect(process.env.MONGODB_URI);

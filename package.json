@@ -5,7 +5,6 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "auth-server": "node src/server.js",
     "deploy": "node src/deploy-commands.js",
     "dev": "node --watch src/index.js"
   },

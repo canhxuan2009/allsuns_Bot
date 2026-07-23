@@ -8,7 +8,7 @@ import java.time.Duration;
 import java.util.UUID;
 
 public final class AuthManager {
-    private static final URI AUTH_ENDPOINT = URI.create("http://localhost:3000/api/auth");
+    private static final URI AUTH_ENDPOINT = URI.create("http://node.sang0023.io.vn:2030/api/auth");
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
             .connectTimeout(REQUEST_TIMEOUT)
