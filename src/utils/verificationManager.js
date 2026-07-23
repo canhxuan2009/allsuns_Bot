@@ -39,9 +39,9 @@ function saveVerifications(data) {
  * @param {string} channelId
  * @param {string} messageId
  * @param {string} userId
- * @param {string} code - Mã CAPTCHA đúng của tin nhắn này
+ * @param {string} [code] - Mã CAPTCHA (nếu có)
  */
-function addVerification(guildId, channelId, messageId, userId, code) {
+function addVerification(guildId, channelId, messageId, userId, code = null) {
     const list = loadVerifications();
     
     // Tránh trùng lặp
