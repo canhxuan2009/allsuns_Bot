@@ -2,7 +2,7 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
-const { Client, Collection, GatewayIntentBits, Events, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const { Client, Collection, GatewayIntentBits, Events, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const logger = require('./utils/logger');
 const { init: initAutoRename, scheduleRename } = require('./utils/autoRename');
 const { getTracked } = require('./utils/tracker');
@@ -10,6 +10,9 @@ const { translateToVietnamese } = require('./utils/translator');
 const { handleEscrowInteraction } = require('./utils/escrowInteractions');
 const { handleShopInteraction } = require('./utils/shopInteractions');
 const { handleTicketInteraction } = require('./utils/ticketInteractions');
+const { addVerification, removeVerification, getVerification, initVerificationCleanup } = require('./utils/verificationManager');
+const { generateCaptcha } = require('./utils/captchaGenerator');
+const { startServer: startAuthServer } = require('./server');
 
 // ─── Cấu hình dịch tự động DonutSMP ────────────────────────────────────
 // Channel nguồn: nơi chứa thông báo tiếng Anh từ DonutSMP
@@ -105,39 +108,91 @@ client.on(Events.InteractionCreate, async (interaction) => {
 client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isButton() && !interaction.isModalSubmit() && !interaction.isStringSelectMenu()) return;
 
-    // ── Xử lý nút xác minh con người ────────────────────────────────
-    if (interaction.isButton() && (interaction.customId === 'verify_human' || interaction.customId === 'verify_dog')) {
+    // ── Xử lý nút "Nhập Mã" → hiện Modal CAPTCHA ────────────────────────
+    if (interaction.isButton() && interaction.customId === 'click_verify_captcha') {
         try {
-            const member = interaction.member;
-            if (!member) return;
+            const record = getVerification(interaction.message.id);
 
+            // Kiểm tra xem người bấm có đúng là chủ phiên xác minh không
+            if (!record || record.userId !== interaction.user.id) {
+                await interaction.reply({
+                    content: '❌ Phiên xác minh này không dành cho bạn.',
+                    ephemeral: true
+                });
+                return;
+            }
+
+            // Hiện Modal nhập mã CAPTCHA
+            const modal = new ModalBuilder()
+                .setCustomId(`submit_captcha:${interaction.message.id}`)
+                .setTitle('🔐 Xác Minh Con Người');
+
+            const codeInput = new TextInputBuilder()
+                .setCustomId('captcha_code')
+                .setLabel('Nhập các ký tự bạn thấy trong ảnh')
+                .setStyle(TextInputStyle.Short)
+                .setMinLength(5)
+                .setMaxLength(5)
+                .setPlaceholder('Ví dụ: AB3K7')
+                .setRequired(true);
+
+            modal.addComponents(new ActionRowBuilder().addComponents(codeInput));
+            await interaction.showModal(modal);
+        } catch (error) {
+            logger.error(`[ImageMod] Lỗi khi hiện modal CAPTCHA: ${error.message}`);
+        }
+        return;
+    }
+
+    // ── Xử lý gửi đáp án CAPTCHA từ Modal ───────────────────────────────
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('submit_captcha:')) {
+        const messageId = interaction.customId.split(':')[1];
+        try {
+            const record = getVerification(messageId);
+            if (!record) {
+                await interaction.reply({
+                    content: '❌ Phiên xác minh đã hết hạn hoặc không tồn tại. Vui lòng liên hệ Admin.',
+                    ephemeral: true
+                });
+                return;
+            }
+
+            const userInput = interaction.fields.getTextInputValue('captcha_code').toUpperCase().trim();
+            const correctCode = record.code.toUpperCase();
+
+            if (userInput !== correctCode) {
+                await interaction.reply({
+                    content: `❌ Mã xác minh **${userInput}** không đúng. Vui lòng nhìn kỹ ảnh và thử lại.`,
+                    ephemeral: true
+                });
+                return;
+            }
+
+            // Mã đúng → gỡ role giới hạn
             const restrictedRoleId = process.env.MODERATION_RESTRICTED_ROLE_ID;
-            if (!restrictedRoleId) {
-                await interaction.reply({ content: '❌ Chưa cấu hình role giới hạn.', ephemeral: true });
-                return;
+            const member = interaction.member;
+            if (member && restrictedRoleId && member.roles.cache.has(restrictedRoleId)) {
+                await member.roles.remove(restrictedRoleId, '[AutoMod] Đã xác minh CAPTCHA thành công');
+                logger.info(`[ImageMod] ✅ Đã gỡ role giới hạn cho ${interaction.user.tag} sau khi xác minh CAPTCHA.`);
             }
-
-            // Kiểm tra user có đang bị giới hạn hay không
-            if (!member.roles.cache.has(restrictedRoleId)) {
-                await interaction.reply({ content: '✅ Bạn không bị giới hạn, không cần xác minh.', ephemeral: true });
-                return;
-            }
-
-            // Gỡ role giới hạn → khôi phục quyền truy cập bình thường
-            await member.roles.remove(restrictedRoleId, '[AutoMod] Đã xác minh con người');
-            logger.info(`[ImageMod] ✅ Đã gỡ role giới hạn cho ${interaction.user.tag} sau khi xác minh.`);
 
             await interaction.reply({
                 content: '✅ Xác minh thành công! Quyền truy cập của bạn đã được khôi phục.',
                 ephemeral: true
             });
 
-            // Xoá tin nhắn panel xác minh sau khi hoàn tất
+            // Xoá tin nhắn CAPTCHA và record trong JSON
             try {
-                await interaction.message.delete();
+                removeVerification(messageId);
+                const verifyChannel = interaction.channel;
+                if (verifyChannel) {
+                    const msg = await verifyChannel.messages.fetch(messageId).catch(() => null);
+                    if (msg) await msg.delete().catch(() => {});
+                }
             } catch { /* ignore */ }
+
         } catch (error) {
-            logger.error(`[ImageMod] Lỗi xử lý xác minh: ${error.message}`);
+            logger.error(`[ImageMod] Lỗi xử lý CAPTCHA submit: ${error.message}`);
             try {
                 await interaction.reply({ content: '❌ Đã xảy ra lỗi khi xác minh. Vui lòng liên hệ Admin.', ephemeral: true });
             } catch { /* ignore */ }
@@ -405,40 +460,42 @@ client.on(Events.MessageCreate, async (message) => {
                     }
                 }
 
-                // 3. Gửi panel xác minh con người vào kênh xác minh
+                // 3. Gửi panel xác minh CAPTCHA vào kênh xác minh
                 if (MODERATION_VERIFY_CHANNEL_ID) {
                     try {
                         const verifyChannel = await message.guild.channels.fetch(MODERATION_VERIFY_CHANNEL_ID);
                         if (verifyChannel) {
+                            // Tạo ảnh CAPTCHA
+                            const { code, buffer } = generateCaptcha();
+
                             const verifyEmbed = new EmbedBuilder()
                                 .setColor(0xFF6B6B)
                                 .setTitle('🔒 Xác Minh Con Người')
                                 .setDescription(
                                     `${message.author}, tài khoản của bạn đã bị tạm thời giới hạn do hệ thống phát hiện nội dung vi phạm.\n\n` +
-                                    `Để khôi phục quyền truy cập, vui lòng nhấn **một trong hai nút** bên dưới để xác minh.`
+                                    `Nhìn vào **hình ảnh bên dưới**, nhấn nút **📝 Nhập Mã** và điền các ký tự bạn thấy để xác minh.`
                                 )
-                                .setFooter({ text: 'Hệ thống kiểm duyệt tự động' })
+                                .setImage('attachment://captcha.png')
+                                .setFooter({ text: 'Hệ thống kiểm duyệt tự động • Không phân biệt hoa thường' })
                                 .setTimestamp();
 
                             const verifyRow = new ActionRowBuilder().addComponents(
                                 new ButtonBuilder()
-                                    .setCustomId('verify_human')
-                                    .setLabel('Người')
-                                    .setEmoji('🧑')
-                                    .setStyle(ButtonStyle.Success),
-                                new ButtonBuilder()
-                                    .setCustomId('verify_dog')
-                                    .setLabel('Chó')
-                                    .setEmoji('🐕')
-                                    .setStyle(ButtonStyle.Secondary),
+                                    .setCustomId('click_verify_captcha')
+                                    .setLabel('📝 Nhập Mã')
+                                    .setStyle(ButtonStyle.Primary)
                             );
 
-                            await verifyChannel.send({
+                            const sentVerifyMessage = await verifyChannel.send({
                                 content: `${message.author}`,
                                 embeds: [verifyEmbed],
+                                files: [{ attachment: buffer, name: 'captcha.png' }],
                                 components: [verifyRow]
                             });
-                            logger.info(`[ImageMod] 📋 Đã gửi panel xác minh cho ${message.author.tag} tại kênh xác minh.`);
+                            logger.info(`[ImageMod] 📋 Đã gửi panel xác minh CAPTCHA cho ${message.author.tag} (code: ${code}).`);
+
+                            // Lưu thông tin kèm mã CAPTCHA để tự động dọn dẹp và đối chiếu
+                            addVerification(message.guild.id, verifyChannel.id, sentVerifyMessage.id, message.author.id, code);
                         }
                     } catch (verifyErr) {
                         logger.error(`[ImageMod] Không thể gửi panel xác minh: ${verifyErr.message}`);
@@ -452,7 +509,7 @@ client.on(Events.MessageCreate, async (message) => {
                     `📍 **Kênh:** #${message.channel.name} (${message.channel.id})\n` +
                     `🏠 **Server:** ${message.guild.name}\n` +
                     `📝 **Lý do:** ${result.reason}\n` +
-                    `🔒 **Hành động:** Đã giới hạn quyền truy cập — chờ xác minh con người\n` +
+                    `🔒 **Hành động:** Đã giới hạn quyền truy cập — chờ xác minh CAPTCHA\n` +
                     `🕐 **Thời gian:** ${new Date().toLocaleString('vi-VN')}`;
 
                 if (MODERATION_OWNER_ID) {
@@ -513,6 +570,9 @@ client.once(Events.ClientReady, async (readyClient) => {
     logger.info(`${client.commands.size} command(s) đã load`);
     logger.info(`File log: ${logger.currentFile}`);
     logger.info('━'.repeat(50));
+
+    // Khởi tạo dọn dẹp các tin nhắn xác minh quá hạn
+    initVerificationCleanup(readyClient);
 
     // Tự động dọn dẹp và đồng bộ lại Slash Commands lên Discord
     try {
@@ -601,6 +661,9 @@ client.on(Events.MessageCreate, async (message) => {
 
 // ─── Kết nối MongoDB rồi đăng nhập Discord ─────────────────────────────
 async function start() {
+    // Khởi tạo Auth API Server
+    startAuthServer();
+
     try {
         await mongoose.connect(process.env.MONGODB_URI);
         logger.info('✅ Đã kết nối MongoDB Atlas thành công!');

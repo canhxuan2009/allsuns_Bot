@@ -5,6 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "auth-server": "node src/server.js",
     "deploy": "node src/deploy-commands.js",
     "dev": "node --watch src/index.js"
   },
@@ -15,8 +16,11 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "canvas": "^3.2.3",
     "discord.js": "^14.18.0",
     "dotenv": "^16.5.0",
+    "express": "^4.19.2",
     "mongoose": "^9.7.3"
   }
 }
+
